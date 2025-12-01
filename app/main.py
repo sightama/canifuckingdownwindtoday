@@ -69,7 +69,7 @@ def index():
 
     with ui.column().classes('w-full items-center'):
         # Title
-        ui.html('<div class="title">CAN I FUCKING DOWNWIND TODAY</div>')
+        ui.html('<div class="title">CAN I FUCKING DOWNWIND TODAY</div>', sanitize=False)
 
         # Toggle between SUP and Parawing
         with ui.row().classes('toggle-container'):
@@ -79,17 +79,17 @@ def index():
             ).style('border: 2px solid #000000; padding: 5px;')
 
         # Rating display (will update based on toggle)
-        rating_label = ui.html('<div class="rating">--/10</div>')
-        description_label = ui.html('<div class="description">Loading conditions...</div>')
+        rating_label = ui.html('<div class="rating">--/10</div>', sanitize=False)
+        description_label = ui.html('<div class="description">Loading conditions...</div>', sanitize=False)
 
         # Foil recommendations
         with ui.column().classes('recommendations'):
-            ui.html('<div class="rec-title">--- FOIL RECOMMENDATIONS ---</div>')
-            code_rec = ui.html('<div class="rec-item">CODE: Loading...</div>')
-            kt_rec = ui.html('<div class="rec-item">KT: Loading...</div>')
+            ui.html('<div class="rec-title">--- FOIL RECOMMENDATIONS ---</div>', sanitize=False)
+            code_rec = ui.html('<div class="rec-item">CODE: Loading...</div>', sanitize=False)
+            kt_rec = ui.html('<div class="rec-item">KT: Loading...</div>', sanitize=False)
 
         # Last updated timestamp
-        timestamp_label = ui.html('<div class="timestamp">Last updated: --</div>')
+        timestamp_label = ui.html('<div class="timestamp">Last updated: --</div>', sanitize=False)
 
         def update_display():
             """Update display based on toggle selection"""
