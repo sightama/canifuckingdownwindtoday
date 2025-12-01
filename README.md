@@ -2,6 +2,8 @@
 
 A snarky web app that tells you whether today is a good day for downwind SUP foiling or parawing in Jupiter, FL.
 
+![Can I Fucking Downwind Today - Homepage](docs/images/cifdt-home.png)
+
 ## Features
 
 - **1-10 Condition Rating**: Objective scoring based on wind speed, direction, wave height, and swell
