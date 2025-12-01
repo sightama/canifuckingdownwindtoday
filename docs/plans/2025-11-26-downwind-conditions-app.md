@@ -6,7 +6,7 @@
 
 **Architecture:** Hybrid approach - fetch raw weather data from free APIs (NOAA, OpenWeatherMap), calculate 1-10 ratings with deterministic logic, use LLM API to generate snarky descriptions. Cache everything for 2-3 hours to minimize API costs and maximize speed.
 
-**Tech Stack:** Python, NiceGUI, NOAA/OpenWeatherMap APIs, Anthropic Claude API (or other LLM), pytest
+**Tech Stack:** Python, NiceGUI, NOAA/OpenWeatherMap APIs, Google Gemini 2.5 Flash (free tier), pytest
 
 ---
 
@@ -32,12 +32,12 @@ Before starting, ensure you have:
 Create `/Users/lanekubicki/tmp/canifuckingdownwindtoday/requirements.txt`:
 
 ```txt
-nicegui==1.4.21
-anthropic==0.39.0
-requests==2.31.0
-python-dotenv==1.0.0
-pytest==7.4.3
-pytest-asyncio==0.23.2
+nicegui>=2.0.0
+google-generativeai>=0.8.0
+requests>=2.32.0
+python-dotenv>=1.0.0
+pytest>=8.0.0
+pytest-asyncio>=0.24.0
 ```
 
 **Step 2: Create .env.example**
@@ -45,7 +45,7 @@ pytest-asyncio==0.23.2
 Create `/Users/lanekubicki/tmp/canifuckingdownwindtoday/.env.example`:
 
 ```
-ANTHROPIC_API_KEY=your_api_key_here
+GEMINI_API_KEY=your_api_key_here
 CACHE_REFRESH_HOURS=2
 ```
 
@@ -160,7 +160,7 @@ class Config:
     OPTIMAL_WAVE_MAX = 4   # feet
 
     # API Keys
-    ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
     # Caching
     CACHE_REFRESH_HOURS = int(os.getenv("CACHE_REFRESH_HOURS", "2"))
@@ -1215,7 +1215,7 @@ Create `/Users/lanekubicki/tmp/canifuckingdownwindtoday/tests/ai/__init__.py`:
 Create `/Users/lanekubicki/tmp/canifuckingdownwindtoday/tests/ai/test_llm_client.py`:
 
 ```python
-# ABOUTME: Tests for LLM client interface (Anthropic Claude API)
+# ABOUTME: Tests for LLM client interface (Google Gemini API)
 # ABOUTME: Uses mocked responses to avoid real API calls and costs in tests
 
 from unittest.mock import Mock, patch
@@ -1225,10 +1225,10 @@ from app.ai.llm_client import LLMClient
 def test_llm_client_generates_description():
     """LLMClient should generate snarky description from conditions"""
     mock_response = Mock()
-    mock_response.content = [Mock(text="Conditions are decent but you're probably gonna fuck it up anyway.")]
+    mock_response.text = "Conditions are decent but you're probably gonna fuck it up anyway."
 
-    with patch('anthropic.Anthropic') as mock_anthropic:
-        mock_anthropic.return_value.messages.create.return_value = mock_response
+    with patch('google.generativeai.GenerativeModel') as mock_gemini:
+        mock_gemini.return_value.generate_content.return_value = mock_response
 
         client = LLMClient(api_key="test_key")
         result = client.generate_description(
@@ -1246,8 +1246,8 @@ def test_llm_client_generates_description():
 
 def test_llm_client_handles_api_failure():
     """LLMClient should handle API failures gracefully"""
-    with patch('anthropic.Anthropic') as mock_anthropic:
-        mock_anthropic.return_value.messages.create.side_effect = Exception("API error")
+    with patch('google.generativeai.GenerativeModel') as mock_gemini:
+        mock_gemini.return_value.generate_content.side_effect = Exception("API error")
 
         client = LLMClient(api_key="test_key")
         result = client.generate_description(
@@ -1279,16 +1279,16 @@ Create `/Users/lanekubicki/tmp/canifuckingdownwindtoday/app/ai/__init__.py`:
 
 ```python
 # ABOUTME: AI/LLM integration module for generating snarky descriptions
-# ABOUTME: Handles Claude API (or other LLM) calls with proper error handling
+# ABOUTME: Handles Google Gemini API calls with proper error handling
 ```
 
 Create `/Users/lanekubicki/tmp/canifuckingdownwindtoday/app/ai/llm_client.py`:
 
 ```python
 # ABOUTME: LLM API client for generating condition descriptions
-# ABOUTME: Supports Anthropic Claude with fallback error handling
+# ABOUTME: Supports Google Gemini 2.5 Flash with fallback error handling
 
-import anthropic
+import google.generativeai as genai
 from typing import Optional
 
 
@@ -1296,7 +1296,8 @@ class LLMClient:
     """Client for generating snarky descriptions via LLM API"""
 
     def __init__(self, api_key: str):
-        self.client = anthropic.Anthropic(api_key=api_key)
+        genai.configure(api_key=api_key)
+        self.model = genai.GenerativeModel("gemini-2.0-flash-exp")
 
     def generate_description(
         self,
@@ -1336,12 +1337,8 @@ Be a passive-aggressive asshole. Question the rider's skills. Use profanity libe
 Be brutally honest about the conditions while roasting the rider."""
 
         try:
-            message = self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=300,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            return message.content[0].text
+            response = self.model.generate_content(prompt)
+            return response.text
         except Exception as e:
             print(f"LLM API error: {e}")
             return f"LLM service unavailable. Conditions: {wind_speed}kts {wind_direction}, {wave_height}ft waves. Rating: {rating}/10. Figure it out yourself."
@@ -1758,7 +1755,7 @@ from app.orchestrator import AppOrchestrator
 
 
 # Initialize orchestrator
-orchestrator = AppOrchestrator(api_key=Config.ANTHROPIC_API_KEY)
+orchestrator = AppOrchestrator(api_key=Config.GEMINI_API_KEY)
 
 
 @ui.page('/')
@@ -1857,7 +1854,7 @@ from app.orchestrator import AppOrchestrator
 
 
 # Initialize orchestrator
-orchestrator = AppOrchestrator(api_key=Config.ANTHROPIC_API_KEY)
+orchestrator = AppOrchestrator(api_key=Config.GEMINI_API_KEY)
 
 
 @ui.page('/')
@@ -2165,17 +2162,17 @@ def test_full_sup_rating_flow():
     }
 
     mock_llm_response = Mock()
-    mock_llm_response.content = [Mock(text="Perfect conditions, now don't fuck it up.")]
+    mock_llm_response.text = "Perfect conditions, now don't fuck it up."
 
     with patch('requests.get') as mock_get, \
-         patch('anthropic.Anthropic') as mock_anthropic:
+         patch('google.generativeai.GenerativeModel') as mock_gemini:
 
         # Mock NOAA API
         mock_get.return_value.json.return_value = mock_noaa_response
         mock_get.return_value.status_code = 200
 
-        # Mock Claude API
-        mock_anthropic.return_value.messages.create.return_value = mock_llm_response
+        # Mock Gemini API
+        mock_gemini.return_value.generate_content.return_value = mock_llm_response
 
         # Run full flow
         orchestrator = AppOrchestrator(api_key="test_key")
@@ -2202,14 +2199,14 @@ def test_full_parawing_rating_flow():
     }
 
     mock_llm_response = Mock()
-    mock_llm_response.content = [Mock(text="Trashbagger conditions are ON POINT.")]
+    mock_llm_response.text = "Trashbagger conditions are ON POINT."
 
     with patch('requests.get') as mock_get, \
-         patch('anthropic.Anthropic') as mock_anthropic:
+         patch('google.generativeai.GenerativeModel') as mock_gemini:
 
         mock_get.return_value.json.return_value = mock_noaa_response
         mock_get.return_value.status_code = 200
-        mock_anthropic.return_value.messages.create.return_value = mock_llm_response
+        mock_gemini.return_value.generate_content.return_value = mock_llm_response
 
         orchestrator = AppOrchestrator(api_key="test_key")
         rating = orchestrator.get_parawing_rating()
@@ -2481,21 +2478,21 @@ Add to `/Users/lanekubicki/tmp/canifuckingdownwindtoday/README.md` (before Licen
 
 ```bash
 heroku create canifuckingdownwindtoday
-heroku config:set ANTHROPIC_API_KEY=your_key_here
+heroku config:set GEMINI_API_KEY=your_key_here
 git push heroku main
 ```
 
 ### Railway
 
 1. Connect your GitHub repo to Railway
-2. Add environment variable: `ANTHROPIC_API_KEY`
+2. Add environment variable: `GEMINI_API_KEY`
 3. Deploy
 
 ### Fly.io
 
 ```bash
 fly launch
-fly secrets set ANTHROPIC_API_KEY=your_key_here
+fly secrets set GEMINI_API_KEY=your_key_here
 fly deploy
 ```
 ```
@@ -2516,7 +2513,7 @@ git commit -m "feat: add deployment configuration for Heroku, Railway, Fly.io"
 
 **Step 1: Create .env with actual API key**
 
-DIRECTOR: You need to create `.env` file manually with your actual Anthropic API key:
+DIRECTOR: You need to create `.env` file manually with your actual Google Gemini API key:
 
 ```bash
 cp .env.example .env
