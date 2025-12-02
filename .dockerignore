@@ -4,5 +4,12 @@ __pycache__/
 .pytest_cache/
 .git/
 .env
+.env.example
 *.log
 tests/
+docs/
+.github/
+.vscode/
+*.md
+LICENSE
+Procfile

@@ -167,4 +167,11 @@ def index():
 
 
 if __name__ in {"__main__", "__mp_main__"}:
-    ui.run(title='Can I Fucking Downwind Today', port=8080)
+    import os
+    port = int(os.environ.get('PORT', 8080))
+    ui.run(
+        title='Can I Fucking Downwind Today',
+        host='0.0.0.0',
+        port=port,
+        reload=False  # Disable reload in production
+    )
