@@ -11,7 +11,7 @@ orchestrator = AppOrchestrator(api_key=Config.GEMINI_API_KEY)
 
 
 @ui.page('/')
-def index():
+async def index():
     """Main page with 90s aesthetic"""
 
     # Apply 90s styling with responsive scaling
