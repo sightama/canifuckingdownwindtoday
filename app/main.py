@@ -4,6 +4,7 @@
 from nicegui import ui
 from app.config import Config
 from app.orchestrator import AppOrchestrator
+from app.ui.crayon_graph import CrayonGraph
 
 
 # Initialize orchestrator
@@ -93,6 +94,48 @@ async def index():
                 line-height: 1.4;
             }
         }
+
+        /* Loading overlay */
+        #loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            transition: opacity 0.5s ease-out;
+        }
+
+        #loading-overlay.fade-out {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        #loading-text {
+            font-family: monospace;
+            font-size: 24px;
+            color: #333;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 0.3; }
+            50% { opacity: 1; }
+        }
+
+        /* Main content - hidden until loaded */
+        #main-content {
+            opacity: 0;
+            transition: opacity 0.5s ease-in;
+        }
+
+        #main-content.visible {
+            opacity: 1;
+        }
     </style>
     """)
 
@@ -109,7 +152,10 @@ async def index():
     </script>
     """)
 
-    with ui.column().classes('w-full items-center container'):
+    # Loading overlay - shown until data is ready
+    ui.html('<div id="loading-overlay"><span id="loading-text">LOADING</span></div>', sanitize=False)
+
+    with ui.column().classes('w-full items-center container').props('id="main-content"'):
         # Title
         ui.html('<div class="title">CAN I FUCKING DOWNWIND TODAY</div>', sanitize=False)
 
@@ -165,6 +211,14 @@ async def index():
             weather = orchestrator.get_weather_context()
             if weather:
                 with conditions_container:
+                    # Render crayon graph
+                    graph = CrayonGraph()
+                    wind_dir = weather.get('wind_direction', 'N')
+                    svg = graph.render(wind_direction=wind_dir)
+
+                    # Display graph
+                    ui.html(svg, sanitize=False).style('width: 100%; display: flex; justify-content: center; margin: 20px 0;')
+
                     ui.label('--- CONDITIONS ---').style('font-size: 18px; font-weight: bold; margin-bottom: 8px;')
                     ui.label(f"Wind: {weather['wind_speed']} {weather['wind_direction']}").style('font-size: 16px;')
                     ui.label(f"Waves: {weather['wave_height']}").style('font-size: 16px;')
@@ -252,6 +306,18 @@ async def index():
                 rating_label.content = '<div class="rating">ERROR</div>'
                 description_label.content = '<div class="description">Something broke. Try refreshing the page.</div>'
 
+        async def show_content():
+            """Fade out loading overlay and fade in main content"""
+            await ui.run_javascript('''
+                document.getElementById('loading-overlay').classList.add('fade-out');
+                document.getElementById('main-content').classList.add('visible');
+                // Remove overlay from DOM after animation
+                setTimeout(() => {
+                    const overlay = document.getElementById('loading-overlay');
+                    if (overlay) overlay.remove();
+                }, 500);
+            ''')
+
         # Update on toggle change (instant since data is cached)
         toggle.on_value_change(lambda: update_display())
 
@@ -259,6 +325,7 @@ async def index():
         async def initial_load():
             await prefetch_all()
             update_display()
+            await show_content()
 
         ui.timer(0.1, initial_load, once=True)
 

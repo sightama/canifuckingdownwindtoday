@@ -1,12 +1,46 @@
 # ABOUTME: Core scoring calculation logic for SUP and parawing modes
 # ABOUTME: Converts weather conditions into 1-10 ratings using location-specific rules
 
+import logging
 from app.weather.models import WeatherConditions
 from app.config import Config
+
+log = logging.getLogger(__name__)
+
+# Perfect conditions thresholds (11/10 day)
+PERFECT_WIND_DIRECTIONS = {"NNW", "NW", "SSE", "SE"}
+PERFECT_WIND_SPEED_MIN = 14.0
+PERFECT_WIND_SPEED_MAX = 20.0
+PERFECT_SWELL_DIRECTION = "NE"
+PERFECT_WAVE_HEIGHT_MIN = 2.0
+PERFECT_WAVE_HEIGHT_MAX = 4.0
 
 
 class ScoreCalculator:
     """Calculates 1-10 ratings for downwind conditions"""
+
+    def _is_perfect_conditions(self, conditions: WeatherConditions) -> bool:
+        """
+        Check if conditions meet the criteria for 11/10 perfect post-frontal day.
+
+        Perfect conditions require:
+        - Wind direction: NNW, NW, SSE, or SE
+        - Wind speed: 14-20 kts
+        - Swell direction: NE
+        - Wave height: 2-4 ft
+
+        Args:
+            conditions: Current weather conditions
+
+        Returns:
+            True if all perfect condition criteria are met
+        """
+        return (
+            conditions.wind_direction in PERFECT_WIND_DIRECTIONS
+            and PERFECT_WIND_SPEED_MIN <= conditions.wind_speed_kts <= PERFECT_WIND_SPEED_MAX
+            and conditions.swell_direction == PERFECT_SWELL_DIRECTION
+            and PERFECT_WAVE_HEIGHT_MIN <= conditions.wave_height_ft <= PERFECT_WAVE_HEIGHT_MAX
+        )
 
     def calculate_sup_score(self, conditions: WeatherConditions) -> int:
         """
@@ -65,7 +99,14 @@ class ScoreCalculator:
             score -= 1  # Too big
 
         # Clamp to 1-10
-        return max(1, min(10, int(round(score))))
+        base_score = max(1, min(10, int(round(score))))
+
+        # Check for perfect post-frontal conditions (11/10 day)
+        if self._is_perfect_conditions(conditions):
+            log.info(f"Perfect conditions detected! Base score: {base_score}, elevated to 11/10")
+            return 11
+
+        return base_score
 
     def calculate_parawing_score(self, conditions: WeatherConditions) -> int:
         """
