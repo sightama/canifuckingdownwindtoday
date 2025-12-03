@@ -130,7 +130,7 @@ async def index():
                     <iframe src="https://video-monitoring.com/beachcams/palmbeachmarriott/stream.htm"
                             style="width: 100%; height: 200px; border: 1px solid #000;"
                             allow="autoplay" allowfullscreen></iframe>
-                ''')
+                ''', sanitize=False)
 
                 # Jupiter Inlet cam (YouTube)
                 ui.label('Jupiter Inlet').style('font-size: 14px; font-weight: bold;')
@@ -138,7 +138,7 @@ async def index():
                     <iframe src="https://www.youtube.com/embed/4y7kDbwBuh0?autoplay=1&mute=1"
                             style="width: 100%; height: 200px; border: 1px solid #000;"
                             allow="autoplay; encrypted-media" allowfullscreen></iframe>
-                ''')
+                ''', sanitize=False)
 
                 # Juno Beach cam (YouTube)
                 ui.label('Juno Beach').style('font-size: 14px; font-weight: bold;')
@@ -146,7 +146,7 @@ async def index():
                     <iframe src="https://www.youtube.com/embed/1FYgBpkM7SA?autoplay=1&mute=1"
                             style="width: 100%; height: 200px; border: 1px solid #000;"
                             allow="autoplay; encrypted-media" allowfullscreen></iframe>
-                ''')
+                ''', sanitize=False)
 
             ui.label('* Recommendations for 195lb/88kg rider').style(
                 'font-size: 12px; color: #666; margin-top: 16px; font-style: italic;'
