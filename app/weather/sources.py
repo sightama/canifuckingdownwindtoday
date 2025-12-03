@@ -74,3 +74,41 @@ class NOAAClient:
                 return (float(match.group(1)) + float(match.group(2))) / 2
             return float(match.group(1))
         return 0.0
+
+    def _parse_swell_direction(self, text: str) -> str | None:
+        """
+        Parse swell direction from NOAA forecast text.
+
+        Handles formats like:
+        - "Northeast swell 3 to 5 ft"
+        - "NE swell around 4 ft"
+        - "Swell from the northeast"
+
+        Returns:
+            Compass direction abbreviation (N, NE, E, etc.) or None if not found
+        """
+        # Map full names to abbreviations
+        direction_map = {
+            "north": "N", "northeast": "NE", "east": "E", "southeast": "SE",
+            "south": "S", "southwest": "SW", "west": "W", "northwest": "NW",
+            "nne": "NNE", "ene": "ENE", "ese": "ESE", "sse": "SSE",
+            "ssw": "SSW", "wsw": "WSW", "wnw": "WNW", "nnw": "NNW",
+        }
+
+        text_lower = text.lower()
+
+        # Pattern 1: "[Direction] swell" (e.g., "Northeast swell 3 ft")
+        pattern1 = r'(north(?:east|west)?|south(?:east|west)?|east|west|n[nesw]?[ew]?|s[nesw]?[ew]?|e[ns]?e?|w[ns]?w?)\s+swell'
+        match = re.search(pattern1, text_lower)
+        if match:
+            direction = match.group(1)
+            return direction_map.get(direction, direction.upper())
+
+        # Pattern 2: "swell from the [direction]"
+        pattern2 = r'swell\s+from\s+(?:the\s+)?(north(?:east|west)?|south(?:east|west)?|east|west)'
+        match = re.search(pattern2, text_lower)
+        if match:
+            direction = match.group(1)
+            return direction_map.get(direction, direction.upper())
+
+        return None
