@@ -8,6 +8,7 @@ from app.scoring.calculator import ScoreCalculator
 from app.scoring.foil_recommender import FoilRecommender
 from app.scoring.models import ConditionRating
 from app.ai.llm_client import LLMClient
+from app.ai.personas import get_random_persona
 from app.cache.manager import CacheManager
 
 
@@ -89,7 +90,10 @@ class AppOrchestrator:
             else:
                 score = self.score_calculator.calculate_parawing_score(conditions)
 
-            # Generate snarky description
+            # Get random persona
+            persona = get_random_persona()
+
+            # Generate snarky description with persona
             try:
                 description = self.llm_client.generate_description(
                     wind_speed=conditions.wind_speed_kts,
@@ -97,7 +101,8 @@ class AppOrchestrator:
                     wave_height=conditions.wave_height_ft,
                     swell_direction=conditions.swell_direction,
                     rating=score,
-                    mode=mode
+                    mode=mode,
+                    persona=persona
                 )
             except Exception as e:
                 print(f"LLM generation failed: {e}")

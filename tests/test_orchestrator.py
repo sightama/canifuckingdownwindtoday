@@ -51,3 +51,32 @@ def test_orchestrator_uses_cached_rating():
         # Should return cached rating without calling weather API
         assert result == cached_rating
         mock_fetcher.return_value.fetch_current_conditions.assert_not_called()
+
+
+def test_orchestrator_uses_persona():
+    """Orchestrator should pass persona to LLM client"""
+    mock_conditions = WeatherConditions(
+        wind_speed_kts=18.0,
+        wind_direction="S",
+        wave_height_ft=3.0,
+        swell_direction="S",
+        timestamp="2025-11-26T14:30:00"
+    )
+
+    with patch('app.orchestrator.WeatherFetcher') as mock_fetcher, \
+         patch('app.orchestrator.ScoreCalculator') as mock_calculator, \
+         patch('app.orchestrator.LLMClient') as mock_llm, \
+         patch('app.orchestrator.FoilRecommender'):
+
+        mock_fetcher.return_value.fetch_current_conditions.return_value = mock_conditions
+        mock_calculator.return_value.calculate_sup_score.return_value = 7
+
+        orchestrator = AppOrchestrator(api_key="test_key")
+
+        rating = orchestrator.get_sup_rating()
+
+        # Verify persona was passed to LLM
+        call_kwargs = mock_llm.return_value.generate_description.call_args[1]
+        assert 'persona' in call_kwargs
+        assert call_kwargs['persona'] is not None
+        assert 'id' in call_kwargs['persona']
