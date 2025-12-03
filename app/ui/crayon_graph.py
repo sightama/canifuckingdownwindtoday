@@ -99,6 +99,21 @@ class CrayonGraph:
         color: str = "blue",
         stroke_width: int = 3
     ) -> str:
+        """Generate a path that looks hand-drawn based on current line_style."""
+        if self.line_style == "sketchy":
+            return self._make_sketchy_line(start, end, color, stroke_width)
+        elif self.line_style == "chunky":
+            return self._make_chunky_line(start, end, color, stroke_width)
+        else:  # wobbly (default)
+            return self._make_wobbly_line_impl(start, end, color, stroke_width)
+
+    def _make_wobbly_line_impl(
+        self,
+        start: tuple[float, float],
+        end: tuple[float, float],
+        color: str = "blue",
+        stroke_width: int = 3
+    ) -> str:
         """Generate a wobbly path that looks hand-drawn."""
         x1, y1 = start
         x2, y2 = end
@@ -126,6 +141,42 @@ class CrayonGraph:
             path_d += f" L {px:.1f} {py:.1f}"
 
         return f'<path d="{path_d}" stroke="{color}" stroke-width="{stroke_width}" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'
+
+    def _make_sketchy_line(
+        self,
+        start: tuple[float, float],
+        end: tuple[float, float],
+        color: str,
+        stroke_width: int
+    ) -> str:
+        """Multiple overlapping strokes like scribbling."""
+        paths = []
+        for i in range(3):
+            offset = (i - 1) * 2
+            adjusted_start = (start[0] + offset, start[1] + offset)
+            adjusted_end = (end[0] + offset, end[1] - offset)
+            path = self._make_wobbly_line_impl(
+                adjusted_start,
+                adjusted_end,
+                color,
+                stroke_width - 1
+            )
+            paths.append(path)
+        return '\n'.join(paths)
+
+    def _make_chunky_line(
+        self,
+        start: tuple[float, float],
+        end: tuple[float, float],
+        color: str,
+        stroke_width: int
+    ) -> str:
+        """Thick irregular line like a fat crayon."""
+        old_wobble = self._wobble_amount
+        self._wobble_amount = 12
+        path = self._make_wobbly_line_impl(start, end, color, stroke_width + 4)
+        self._wobble_amount = old_wobble
+        return path
 
     def _make_wind_arrow(self, direction: str) -> list[str]:
         """Generate wind line with arrow head."""
