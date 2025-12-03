@@ -111,3 +111,38 @@ def test_orchestrator_get_fresh_rating_bypasses_cache():
         orchestrator.get_fresh_rating("sup")
 
         assert mock_llm.return_value.generate_description.call_count > first_call_count
+
+
+def test_orchestrator_get_weather_context_returns_formatted_conditions():
+    """get_weather_context should return formatted weather data"""
+    mock_conditions = WeatherConditions(
+        wind_speed_kts=18.5,
+        wind_direction="SSE",
+        wave_height_ft=3.2,
+        swell_direction="SE",
+        timestamp="2025-11-26T14:30:00"
+    )
+
+    with patch('app.orchestrator.WeatherFetcher') as mock_fetcher:
+        mock_fetcher.return_value.fetch_current_conditions.return_value = mock_conditions
+
+        orchestrator = AppOrchestrator(api_key="test_key")
+        context = orchestrator.get_weather_context()
+
+        assert context is not None
+        assert context["wind_speed"] == "18.5 kts"
+        assert context["wind_direction"] == "SSE"
+        assert context["wave_height"] == "3.2 ft"
+        assert context["swell_direction"] == "SE"
+        assert context["timestamp"] == "2025-11-26T14:30:00"
+
+
+def test_orchestrator_get_weather_context_returns_none_when_unavailable():
+    """get_weather_context should return None when weather unavailable"""
+    with patch('app.orchestrator.WeatherFetcher') as mock_fetcher:
+        mock_fetcher.return_value.fetch_current_conditions.return_value = None
+
+        orchestrator = AppOrchestrator(api_key="test_key")
+        context = orchestrator.get_weather_context()
+
+        assert context is None

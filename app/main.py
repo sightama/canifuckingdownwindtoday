@@ -150,6 +150,7 @@ def index():
                     ui.label(f"Wind: {weather['wind_speed']} {weather['wind_direction']}").style('font-size: 16px;')
                     ui.label(f"Waves: {weather['wave_height']}").style('font-size: 16px;')
                     ui.label(f"Swell: {weather['swell_direction']}").style('font-size: 16px;')
+                    ui.label(f"Data from: {weather['timestamp']}").style('font-size: 12px; color: #666; margin-top: 8px;')
             else:
                 with conditions_container:
                     ui.label('Weather data unavailable').style('font-size: 16px; color: #666;')
