@@ -3,7 +3,9 @@
 
 import pytest
 from unittest.mock import Mock, patch, MagicMock
+from datetime import datetime, timezone
 from app.orchestrator import AppOrchestrator
+from app.weather.models import SensorReading
 
 
 def create_noaa_mock_responses(wind_speed, wind_direction, seas_text):
@@ -33,6 +35,20 @@ def create_noaa_mock_responses(wind_speed, wind_direction, seas_text):
     return [point_response, forecast_response]
 
 
+def create_sensor_reading(wind_speed_kts: float, wind_direction: str) -> SensorReading:
+    """Create mock SensorReading for testing"""
+    return SensorReading(
+        wind_speed_kts=wind_speed_kts,
+        wind_gust_kts=wind_speed_kts + 3.0,
+        wind_lull_kts=wind_speed_kts - 2.0,
+        wind_direction=wind_direction,
+        wind_degrees=0,
+        air_temp_f=75.0,
+        timestamp_utc=datetime.now(timezone.utc),
+        spot_name="Jupiter-Juno Beach Pier"
+    )
+
+
 @pytest.mark.integration
 def test_foil_recommendations_flow():
     """Test foil recommendation generation"""
@@ -54,12 +70,11 @@ class TestUnifiedCacheIntegration:
 
     def test_full_refresh_cycle(self):
         """Test complete refresh: weather fetch -> rating calc -> variation generation"""
-        with patch('app.weather.sources.requests') as mock_requests, \
+        with patch('app.weather.sensor.SensorClient.fetch') as mock_sensor_fetch, \
              patch('app.ai.llm_client.genai') as mock_genai:
 
-            # Mock weather API response
-            mock_weather_responses = create_noaa_mock_responses("18 mph", "N", "Seas 2 to 3 ft")
-            mock_requests.get.side_effect = mock_weather_responses
+            # Mock sensor reading (18 knots from N)
+            mock_sensor_fetch.return_value = create_sensor_reading(18.0, "N")
 
             # Mock LLM response with proper persona format
             mock_llm_response = MagicMock()
@@ -123,13 +138,13 @@ class TestUnifiedCacheIntegration:
             assert mock_model.generate_content.call_count == 2
 
             # Second call should use cache (no new API calls)
-            initial_weather_call_count = mock_requests.get.call_count
+            initial_sensor_call_count = mock_sensor_fetch.call_count
             initial_llm_call_count = mock_model.generate_content.call_count
 
             data2 = orchestrator.get_cached_data()
 
             # Verify no new API calls were made
-            assert mock_requests.get.call_count == initial_weather_call_count
+            assert mock_sensor_fetch.call_count == initial_sensor_call_count
             assert mock_model.generate_content.call_count == initial_llm_call_count
 
             # Verify data is the same
