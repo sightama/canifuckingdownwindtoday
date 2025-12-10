@@ -3,7 +3,7 @@
 
 import pytest
 from unittest.mock import Mock, patch, MagicMock
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from app.orchestrator import AppOrchestrator
 from app.weather.models import SensorReading
 
@@ -150,3 +150,157 @@ class TestUnifiedCacheIntegration:
             # Verify data is the same
             assert data2['weather']['wind_direction'] == 'N'
             assert data2['ratings'] == data['ratings']
+
+
+class TestSensorIntegration:
+    """Integration tests for sensor-based data flow"""
+
+    def test_full_sensor_to_rating_flow(self):
+        """Test complete flow: sensor fetch -> rating calc -> variation generation"""
+        with patch('app.weather.sensor.requests') as mock_requests, \
+             patch('app.ai.llm_client.genai') as mock_genai:
+
+            # Mock WeatherFlow API response
+            mock_wf_response = MagicMock()
+            mock_wf_response.status_code = 200
+            mock_wf_response.json.return_value = {
+                "status": {"status_code": 0},
+                "spots": [{
+                    "name": "Jupiter-Juno Beach Pier",
+                    "data_names": [
+                        "timestamp", "utc_timestamp", "avg", "lull", "gust",
+                        "dir", "dir_text", "atemp", "wtemp", "pres"
+                    ],
+                    "stations": [{
+                        "data_values": [[
+                            "2025-12-10 12:51:16",
+                            datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                            18.0, 14.0, 22.0, 0, "N", 75.0, None, 1013.0
+                        ]]
+                    }]
+                }]
+            }
+            mock_requests.get.return_value = mock_wf_response
+
+            # Mock LLM response
+            mock_llm_response = MagicMock()
+            mock_llm_response.text = """===PERSONA:drill_sergeant===
+1. Test response for integration.
+===PERSONA:disappointed_dad===
+1. Dad response here."""
+            mock_model = MagicMock()
+            mock_model.generate_content.return_value = mock_llm_response
+            mock_genai.GenerativeModel.return_value = mock_model
+
+            # Run the flow
+            orchestrator = AppOrchestrator(api_key="test-key")
+
+            result = orchestrator.get_cached_data()
+
+            # Verify result structure
+            assert result["is_offline"] is False
+            assert result["ratings"]["sup"] >= 1
+            assert result["ratings"]["parawing"] >= 1
+            assert result["weather"]["wind_speed"] == 18.0
+            assert result["weather"]["wind_direction"] == "N"
+
+    def test_offline_flow_when_sensor_returns_stale_data(self):
+        """Test offline state when sensor data is stale"""
+        with patch('app.weather.sensor.requests') as mock_requests, \
+             patch('app.ai.llm_client.genai') as mock_genai:
+
+            # Mock stale sensor data (10 min old)
+            old_timestamp = datetime.now(timezone.utc) - timedelta(minutes=10)
+
+            mock_wf_response = MagicMock()
+            mock_wf_response.status_code = 200
+            mock_wf_response.json.return_value = {
+                "status": {"status_code": 0},
+                "spots": [{
+                    "name": "Test",
+                    "data_names": [
+                        "timestamp", "utc_timestamp", "avg", "lull", "gust",
+                        "dir", "dir_text", "atemp", "wtemp", "pres"
+                    ],
+                    "stations": [{
+                        "data_values": [[
+                            "2025-12-10 12:51:16",
+                            old_timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                            15.0, 12.0, 18.0, 0, "N", 75.0, None, 1013.0
+                        ]]
+                    }]
+                }]
+            }
+            mock_requests.get.return_value = mock_wf_response
+
+            # Mock offline variations
+            mock_llm_response = MagicMock()
+            mock_llm_response.text = """===PERSONA:drill_sergeant===
+1. Sensor's dead, maggot!"""
+            mock_model = MagicMock()
+            mock_model.generate_content.return_value = mock_llm_response
+            mock_genai.GenerativeModel.return_value = mock_model
+
+            orchestrator = AppOrchestrator(api_key="test-key")
+
+            result = orchestrator.get_cached_data()
+
+            assert result["is_offline"] is True
+            assert result["last_known_reading"] is not None
+            # Verify variations structure exists (but is empty in offline mode)
+            assert "variations" in result
+            assert "sup" in result["variations"]
+            assert "parawing" in result["variations"]
+            # In offline mode, variations dict is empty in the response
+            # (offline variations are cached separately and accessed via get_random_variation)
+            assert result["variations"]["sup"] == {}
+            assert result["variations"]["parawing"] == {}
+
+    def test_cache_prevents_redundant_llm_calls(self):
+        """LLM is not called when rating hasn't changed"""
+        with patch('app.weather.sensor.requests') as mock_requests, \
+             patch('app.ai.llm_client.genai') as mock_genai:
+
+            # Setup sensor response
+            mock_wf_response = MagicMock()
+            mock_wf_response.status_code = 200
+            mock_wf_response.json.return_value = {
+                "status": {"status_code": 0},
+                "spots": [{
+                    "name": "Test",
+                    "data_names": [
+                        "timestamp", "utc_timestamp", "avg", "lull", "gust",
+                        "dir", "dir_text", "atemp", "wtemp", "pres"
+                    ],
+                    "stations": [{
+                        "data_values": [[
+                            "ts", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                            18.0, 14.0, 22.0, 0, "N", 75.0, None, 1013.0
+                        ]]
+                    }]
+                }]
+            }
+            mock_requests.get.return_value = mock_wf_response
+
+            mock_llm_response = MagicMock()
+            mock_llm_response.text = "===PERSONA:drill_sergeant===\n1. Test."
+            mock_model = MagicMock()
+            mock_model.generate_content.return_value = mock_llm_response
+            mock_genai.GenerativeModel.return_value = mock_model
+
+            orchestrator = AppOrchestrator(api_key="test-key")
+
+            # First call - should generate variations
+            orchestrator.get_cached_data()
+            first_llm_count = mock_model.generate_content.call_count
+            initial_sensor_call_count = mock_requests.get.call_count
+
+            # Second call with same rating - should NOT regenerate
+            # (sensor cache is fresh, variations cache is fresh, rating same)
+            orchestrator.get_cached_data()
+            second_llm_count = mock_model.generate_content.call_count
+
+            # LLM should not have been called again
+            assert second_llm_count == first_llm_count
+            # Sensor should not have been called again
+            assert mock_requests.get.call_count == initial_sensor_call_count
