@@ -200,3 +200,133 @@ def test_parawing_marginal_wind_tanks_score():
     score = calculator.calculate_parawing_score(conditions)
 
     assert score <= 4
+
+
+# Wind-only scoring tests
+
+from app.weather.models import SensorReading
+from datetime import datetime, timezone
+
+
+class TestWindOnlyScoring:
+    """Tests for scoring with wind data only (no waves)"""
+
+    def test_calculate_score_wind_only_good_conditions(self):
+        """Good wind with no wave data scores reasonably"""
+        calculator = ScoreCalculator()
+
+        reading = SensorReading(
+            wind_speed_kts=18.0,
+            wind_gust_kts=22.0,
+            wind_lull_kts=14.0,
+            wind_direction="N",
+            wind_degrees=0,
+            air_temp_f=75.0,
+            timestamp_utc=datetime.now(timezone.utc),
+            spot_name="Test"
+        )
+
+        score = calculator.calculate_sup_score_from_sensor(reading)
+
+        # Good wind (18 kts) + good direction (N) should score well
+        assert 6 <= score <= 9
+
+    def test_calculate_score_wind_only_light_wind(self):
+        """Light wind scores poorly even without wave penalty"""
+        calculator = ScoreCalculator()
+
+        reading = SensorReading(
+            wind_speed_kts=6.0,
+            wind_gust_kts=8.0,
+            wind_lull_kts=4.0,
+            wind_direction="N",
+            wind_degrees=0,
+            air_temp_f=75.0,
+            timestamp_utc=datetime.now(timezone.utc),
+            spot_name="Test"
+        )
+
+        score = calculator.calculate_sup_score_from_sensor(reading)
+
+        assert score <= 4
+
+    def test_calculate_score_wind_only_bad_direction(self):
+        """Bad wind direction penalizes score"""
+        calculator = ScoreCalculator()
+
+        reading = SensorReading(
+            wind_speed_kts=18.0,
+            wind_gust_kts=22.0,
+            wind_lull_kts=14.0,
+            wind_direction="E",  # Bad - perpendicular to coast
+            wind_degrees=90,
+            air_temp_f=75.0,
+            timestamp_utc=datetime.now(timezone.utc),
+            spot_name="Test"
+        )
+
+        score = calculator.calculate_sup_score_from_sensor(reading)
+
+        assert score <= 6
+
+    def test_parawing_score_wind_only(self):
+        """Parawing scoring works with wind-only data"""
+        calculator = ScoreCalculator()
+
+        reading = SensorReading(
+            wind_speed_kts=20.0,
+            wind_gust_kts=24.0,
+            wind_lull_kts=16.0,
+            wind_direction="S",
+            wind_degrees=180,
+            air_temp_f=75.0,
+            timestamp_utc=datetime.now(timezone.utc),
+            spot_name="Test"
+        )
+
+        score = calculator.calculate_parawing_score_from_sensor(reading)
+
+        assert score >= 7
+
+    def test_parawing_score_tanks_below_15kts(self):
+        """Parawing score tanks when wind is below 15 kts"""
+        calculator = ScoreCalculator()
+
+        reading = SensorReading(
+            wind_speed_kts=12.0,
+            wind_gust_kts=15.0,
+            wind_lull_kts=9.0,
+            wind_direction="S",
+            wind_degrees=180,
+            air_temp_f=75.0,
+            timestamp_utc=datetime.now(timezone.utc),
+            spot_name="Test"
+        )
+
+        score = calculator.calculate_parawing_score_from_sensor(reading)
+
+        assert score <= 4
+
+    def test_calculate_score_with_optional_wave_data(self):
+        """When wave data is provided, it affects the score"""
+        calculator = ScoreCalculator()
+
+        reading = SensorReading(
+            wind_speed_kts=18.0,
+            wind_gust_kts=22.0,
+            wind_lull_kts=14.0,
+            wind_direction="N",
+            wind_degrees=0,
+            air_temp_f=75.0,
+            timestamp_utc=datetime.now(timezone.utc),
+            spot_name="Test"
+        )
+
+        score_no_waves = calculator.calculate_sup_score_from_sensor(reading)
+        score_with_waves = calculator.calculate_sup_score_from_sensor(
+            reading,
+            wave_height_ft=3.0,
+            swell_direction="NE"
+        )
+
+        assert score_with_waves >= score_no_waves
