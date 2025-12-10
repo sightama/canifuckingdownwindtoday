@@ -76,7 +76,7 @@ jobs:
             --region=${{ env.REGION }} \
             --platform=managed \
             --allow-unauthenticated \
-            --set-secrets=GEMINI_API_KEY=GEMINI_API_KEY:latest \
+            --set-secrets=GEMINI_API_KEY=GEMINI_API_KEY:latest,WF_TOKEN=wf-token:latest \
             --min-instances=0 \
             --max-instances=1 \
             --memory=512Mi \
