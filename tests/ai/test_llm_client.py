@@ -157,3 +157,42 @@ class TestBatchVariationGeneration:
         assert len(result["drill_sergeant"]) == 2
         assert len(result["angry_coach"]) == 3
         assert "Response one" in result["drill_sergeant"][0]
+
+
+class TestOfflineVariations:
+    """Tests for generating offline persona responses"""
+
+    def test_generate_offline_variations_returns_dict(self):
+        """Offline generation returns variations keyed by persona"""
+        with patch('app.ai.llm_client.genai') as mock_genai:
+            mock_response = MagicMock()
+            mock_response.text = """===PERSONA:drill_sergeant===
+1. The sensor's AWOL, just like your commitment to this sport, maggot!
+2. Can't get a reading? Maybe the sensor got tired of watching you fail.
+===PERSONA:disappointed_dad===
+1. Even the sensor doesn't want to watch you foil today. Can't say I blame it.
+2. The sensor's taking a break. Wish I could take a break from your excuses."""
+
+            mock_model = MagicMock()
+            mock_model.generate_content.return_value = mock_response
+            mock_genai.GenerativeModel.return_value = mock_model
+
+            client = LLMClient(api_key="test-key")
+            result = client.generate_offline_variations()
+
+            assert "drill_sergeant" in result
+            assert "disappointed_dad" in result
+            assert len(result["drill_sergeant"]) == 2
+            assert "sensor" in result["drill_sergeant"][0].lower()
+
+    def test_generate_offline_variations_handles_error(self):
+        """Returns empty dict on API failure"""
+        with patch('app.ai.llm_client.genai') as mock_genai:
+            mock_model = MagicMock()
+            mock_model.generate_content.side_effect = Exception("API Error")
+            mock_genai.GenerativeModel.return_value = mock_model
+
+            client = LLMClient(api_key="test-key")
+            result = client.generate_offline_variations()
+
+            assert result == {}

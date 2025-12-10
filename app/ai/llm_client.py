@@ -174,3 +174,54 @@ PERSONA STYLES:
             debug_log(f"Batch API error: {e}", "LLM")
             print(f"LLM batch API error: {e}")
             return {}
+
+    def generate_offline_variations(self, num_variations: int = 4) -> dict[str, list[str]]:
+        """
+        Generate variations for when the sensor is offline.
+
+        Each persona comments on the outage in their unique style.
+
+        Args:
+            num_variations: Number of variations per persona (default 4)
+
+        Returns:
+            Dict mapping persona_id to list of offline response strings.
+            Empty dict on error.
+        """
+        persona_descriptions = "\n".join([
+            f"- {p['id']}: {p['prompt_style'].split('.')[0]}."
+            for p in PERSONAS
+        ])
+
+        persona_ids = ", ".join([p['id'] for p in PERSONAS])
+
+        prompt = f"""The wind sensor at Jupiter-Juno Beach Pier is OFFLINE or returning stale data.
+We cannot provide a foiling conditions rating.
+
+For EACH persona below, write {num_variations} unique 1-2 sentence responses about the sensor being offline.
+Stay in character. Be witty. Reference the sensor outage. You can still use profanity and roast the user.
+Don't provide any actual wind information - just comment on the fact that we can't give them a rating.
+
+Format your response EXACTLY as shown (this format is required for parsing):
+===PERSONA:persona_id===
+1. [response]
+2. [response]
+...
+{num_variations}. [response]
+
+Generate for these personas in this exact order: {persona_ids}
+
+PERSONA STYLES:
+{persona_descriptions}
+"""
+
+        debug_log(f"Offline prompt length: {len(prompt)} chars", "LLM")
+
+        try:
+            response = self.model.generate_content(prompt)
+            debug_log(f"Offline response length: {len(response.text)} chars", "LLM")
+            return parse_variations_response(response.text)
+        except Exception as e:
+            debug_log(f"Offline API error: {e}", "LLM")
+            print(f"LLM offline API error: {e}")
+            return {}
