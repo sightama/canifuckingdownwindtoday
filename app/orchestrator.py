@@ -2,6 +2,8 @@
 # ABOUTME: Handles weather fetch, scoring, LLM generation, caching, and foil recommendations
 
 from typing import Optional
+from datetime import datetime, timezone
+import random
 from app.config import Config
 from app.weather.fetcher import WeatherFetcher
 from app.scoring.calculator import ScoreCalculator
@@ -10,6 +12,7 @@ from app.scoring.models import ConditionRating
 from app.ai.llm_client import LLMClient
 from app.ai.personas import get_random_persona
 from app.cache.manager import CacheManager
+from app.debug import debug_log
 
 
 class AppOrchestrator:
@@ -20,7 +23,7 @@ class AppOrchestrator:
         self.score_calculator = ScoreCalculator()
         self.foil_recommender = FoilRecommender()
         self.llm_client = LLMClient(api_key=api_key)
-        self.cache = CacheManager(refresh_hours=Config.CACHE_REFRESH_HOURS)
+        self.cache = CacheManager(cache_ttl_minutes=15)
 
     def get_sup_rating(self) -> Optional[ConditionRating]:
         """
@@ -115,6 +118,121 @@ class AppOrchestrator:
             "swell_direction": conditions.swell_direction,
             "timestamp": conditions.timestamp
         }
+
+    def get_cached_data(self) -> dict:
+        """
+        Get all data from unified cache. Refreshes if stale.
+
+        Returns:
+            {
+                "timestamp": datetime,
+                "weather": {...},
+                "ratings": {"sup": int, "parawing": int},
+                "variations": {"sup": {...}, "parawing": {...}}
+            }
+        """
+        if self.cache.is_stale():
+            self._refresh_cache()
+
+        cached = self.cache.get_cache()
+        if cached is None:
+            # This shouldn't happen after refresh, but handle gracefully
+            self._refresh_cache()
+            cached = self.cache.get_cache()
+
+        return cached or self._empty_cache_data()
+
+    def _refresh_cache(self) -> None:
+        """
+        Fetch fresh weather, calculate ratings, generate all variations.
+        Stores everything in unified cache.
+        """
+        # Fetch weather ONCE
+        conditions = self.weather_fetcher.fetch_current_conditions(
+            Config.LOCATION_LAT,
+            Config.LOCATION_LON
+        )
+
+        if conditions is None:
+            debug_log("Weather fetch failed, using empty cache", "ORCHESTRATOR")
+            self.cache.set_cache(self._empty_cache_data())
+            return
+
+        weather_data = {
+            "wind_speed": conditions.wind_speed_kts,
+            "wind_direction": conditions.wind_direction,
+            "wave_height": conditions.wave_height_ft,
+            "swell_direction": conditions.swell_direction
+        }
+
+        # Calculate ratings for both modes
+        sup_score = self.score_calculator.calculate_sup_score(conditions)
+        parawing_score = self.score_calculator.calculate_parawing_score(conditions)
+
+        ratings = {
+            "sup": sup_score,
+            "parawing": parawing_score
+        }
+
+        # Generate variations for both modes
+        variations = {"sup": {}, "parawing": {}}
+
+        for mode in ["sup", "parawing"]:
+            mode_variations = self.llm_client.generate_all_variations(
+                wind_speed=conditions.wind_speed_kts,
+                wind_direction=conditions.wind_direction,
+                wave_height=conditions.wave_height_ft,
+                swell_direction=conditions.swell_direction,
+                rating=ratings[mode],
+                mode=mode
+            )
+            variations[mode] = mode_variations
+
+        # Store everything together
+        cache_data = {
+            "timestamp": datetime.now(timezone.utc),
+            "weather": weather_data,
+            "ratings": ratings,
+            "variations": variations
+        }
+
+        self.cache.set_cache(cache_data)
+        debug_log(f"Cache refreshed with {sum(len(v) for v in variations['sup'].values())} SUP variations", "ORCHESTRATOR")
+
+    def _empty_cache_data(self) -> dict:
+        """Return empty cache structure for error cases."""
+        return {
+            "timestamp": datetime.now(timezone.utc),
+            "weather": {"wind_speed": 0, "wind_direction": "N", "wave_height": 0, "swell_direction": "N"},
+            "ratings": {"sup": 0, "parawing": 0},
+            "variations": {"sup": {}, "parawing": {}}
+        }
+
+    def get_random_variation(self, mode: str, persona_id: str) -> str:
+        """
+        Get a random variation for the given mode and persona.
+
+        Args:
+            mode: "sup" or "parawing"
+            persona_id: e.g., "drill_sergeant"
+
+        Returns:
+            Random response string, or fallback if none available.
+        """
+        cached = self.get_cached_data()
+
+        variations = cached.get("variations", {}).get(mode, {}).get(persona_id, [])
+
+        if variations:
+            return random.choice(variations)
+
+        # Fallback message
+        weather = cached.get("weather", {})
+        rating = cached.get("ratings", {}).get(mode, 0)
+        return (
+            f"Conditions: {weather.get('wind_speed', 0)}kts {weather.get('wind_direction', 'N')}, "
+            f"{weather.get('wave_height', 0)}ft waves. Rating: {rating}/10. Figure it out yourself."
+        )
 
     def _generate_rating(self, mode: str, exclude_persona_id: Optional[str] = None) -> Optional[ConditionRating]:
         """Generate fresh rating for given mode"""

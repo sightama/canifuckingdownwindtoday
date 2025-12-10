@@ -146,3 +146,139 @@ def test_orchestrator_get_weather_context_returns_none_when_unavailable():
         context = orchestrator.get_weather_context()
 
         assert context is None
+
+
+class TestUnifiedCache:
+    """Tests for the unified caching system"""
+
+    def test_get_cached_data_returns_fresh_cache(self):
+        """Returns cached data when cache is fresh"""
+        from datetime import datetime, timezone
+        with patch('app.orchestrator.WeatherFetcher'), \
+             patch('app.orchestrator.LLMClient'), \
+             patch('app.orchestrator.CacheManager') as MockCache:
+
+            mock_cache = Mock()
+            mock_cache.is_stale.return_value = False
+            mock_cache.get_cache.return_value = {
+                "timestamp": datetime.now(timezone.utc),
+                "weather": {"wind_speed": 15.0, "wind_direction": "N", "wave_height": 2.0, "swell_direction": "NE"},
+                "ratings": {"sup": 7, "parawing": 8},
+                "variations": {"sup": {"drill_sergeant": ["test response"]}, "parawing": {}}
+            }
+            MockCache.return_value = mock_cache
+
+            orchestrator = AppOrchestrator(api_key="test_key")
+            orchestrator.cache = mock_cache
+
+            result = orchestrator.get_cached_data()
+
+            assert result["weather"]["wind_speed"] == 15.0
+            assert result["ratings"]["sup"] == 7
+            mock_cache.get_cache.assert_called_once()
+
+    def test_get_cached_data_refreshes_when_stale(self):
+        """Fetches fresh data when cache is stale"""
+        from datetime import datetime, timezone
+        with patch('app.orchestrator.WeatherFetcher') as MockFetcher, \
+             patch('app.orchestrator.LLMClient') as MockLLM, \
+             patch('app.orchestrator.CacheManager') as MockCache, \
+             patch('app.orchestrator.ScoreCalculator') as MockCalc:
+
+            # Setup cache as stale
+            mock_cache = Mock()
+            mock_cache.is_stale.return_value = True
+            MockCache.return_value = mock_cache
+
+            # Setup weather fetcher
+            mock_weather = WeatherConditions(
+                wind_speed_kts=20.0,
+                wind_direction="S",
+                wave_height_ft=3.0,
+                swell_direction="SE",
+                timestamp="2025-12-09T12:00:00"
+            )
+            mock_fetcher = Mock()
+            mock_fetcher.fetch_current_conditions.return_value = mock_weather
+            MockFetcher.return_value = mock_fetcher
+
+            # Setup calculator
+            mock_calc = Mock()
+            mock_calc.calculate_sup_score.return_value = 8
+            mock_calc.calculate_parawing_score.return_value = 7
+            MockCalc.return_value = mock_calc
+
+            # Setup LLM
+            mock_llm = Mock()
+            mock_llm.generate_all_variations.return_value = {
+                "drill_sergeant": ["response 1", "response 2"]
+            }
+            MockLLM.return_value = mock_llm
+
+            orchestrator = AppOrchestrator(api_key="test_key")
+            orchestrator.cache = mock_cache
+            orchestrator.weather_fetcher = mock_fetcher
+            orchestrator.llm_client = mock_llm
+            orchestrator.score_calculator = mock_calc
+
+            result = orchestrator.get_cached_data()
+
+            # Verify weather was fetched
+            mock_fetcher.fetch_current_conditions.assert_called()
+            # Verify LLM was called for both modes
+            assert mock_llm.generate_all_variations.call_count == 2
+            # Verify cache was updated
+            mock_cache.set_cache.assert_called_once()
+
+    def test_get_random_variation_returns_variation(self):
+        """Returns a random variation for given persona and mode"""
+        from datetime import datetime, timezone
+        with patch('app.orchestrator.WeatherFetcher'), \
+             patch('app.orchestrator.LLMClient'), \
+             patch('app.orchestrator.CacheManager') as MockCache:
+
+            mock_cache = Mock()
+            mock_cache.is_stale.return_value = False
+            mock_cache.get_cache.return_value = {
+                "timestamp": datetime.now(timezone.utc),
+                "weather": {},
+                "ratings": {"sup": 7, "parawing": 8},
+                "variations": {
+                    "sup": {
+                        "drill_sergeant": ["response A", "response B", "response C"]
+                    },
+                    "parawing": {}
+                }
+            }
+            MockCache.return_value = mock_cache
+
+            orchestrator = AppOrchestrator(api_key="test_key")
+            orchestrator.cache = mock_cache
+
+            result = orchestrator.get_random_variation("sup", "drill_sergeant")
+
+            assert result in ["response A", "response B", "response C"]
+
+    def test_get_random_variation_returns_fallback_when_missing(self):
+        """Returns fallback message when no variations cached"""
+        from datetime import datetime, timezone
+        with patch('app.orchestrator.WeatherFetcher'), \
+             patch('app.orchestrator.LLMClient'), \
+             patch('app.orchestrator.CacheManager') as MockCache:
+
+            mock_cache = Mock()
+            mock_cache.is_stale.return_value = False
+            mock_cache.get_cache.return_value = {
+                "timestamp": datetime.now(timezone.utc),
+                "weather": {"wind_speed": 10.0, "wind_direction": "N", "wave_height": 1.0, "swell_direction": "E"},
+                "ratings": {"sup": 5, "parawing": 5},
+                "variations": {"sup": {}, "parawing": {}}
+            }
+            MockCache.return_value = mock_cache
+
+            orchestrator = AppOrchestrator(api_key="test_key")
+            orchestrator.cache = mock_cache
+
+            result = orchestrator.get_random_variation("sup", "drill_sergeant")
+
+            assert "conditions" in result.lower() or "figure it out" in result.lower()
