@@ -208,22 +208,26 @@ async def index():
             """Populate and show the WHY dialog"""
             conditions_container.clear()
 
-            weather = orchestrator.get_weather_context()
-            if weather:
+            # Use cached weather data
+            if cached_data:
+                weather_raw = cached_data.get('weather', {})
+                timestamp = cached_data.get('timestamp')
+
                 with conditions_container:
                     # Render crayon graph
                     graph = CrayonGraph()
-                    wind_dir = weather.get('wind_direction', 'N')
+                    wind_dir = weather_raw.get('wind_direction', 'N')
                     svg = graph.render(wind_direction=wind_dir)
 
                     # Display graph
                     ui.html(svg, sanitize=False).style('width: 100%; display: flex; justify-content: center; margin: 20px 0;')
 
                     ui.label('--- CONDITIONS ---').style('font-size: 18px; font-weight: bold; margin-bottom: 8px;')
-                    ui.label(f"Wind: {weather['wind_speed']} {weather['wind_direction']}").style('font-size: 16px;')
-                    ui.label(f"Waves: {weather['wave_height']}").style('font-size: 16px;')
-                    ui.label(f"Swell: {weather['swell_direction']}").style('font-size: 16px;')
-                    ui.label(f"Data from: {weather['timestamp']}").style('font-size: 12px; color: #666; margin-top: 8px;')
+                    ui.label(f"Wind: {weather_raw['wind_speed']:.1f} kts {weather_raw['wind_direction']}").style('font-size: 16px;')
+                    ui.label(f"Waves: {weather_raw['wave_height']:.1f} ft").style('font-size: 16px;')
+                    ui.label(f"Swell: {weather_raw['swell_direction']}").style('font-size: 16px;')
+                    if timestamp:
+                        ui.label(f"Data from: {timestamp.strftime('%Y-%m-%d %H:%M UTC')}").style('font-size: 12px; color: #666; margin-top: 8px;')
             else:
                 with conditions_container:
                     ui.label('Weather data unavailable').style('font-size: 16px; color: #666;')
@@ -252,27 +256,36 @@ async def index():
         # Last updated timestamp
         timestamp_label = ui.html('<div class="timestamp">Last updated: --</div>', sanitize=False)
 
-        # Pre-fetch both ratings to enable instant toggle switching
-        cached_ratings = {'sup': None, 'parawing': None}
+        # Pre-fetch unified cache data
+        cached_data = None
+        current_persona_id = None
         cached_recommendations = None
 
         async def prefetch_all():
-            """Fetch FRESH ratings on page load for both modes"""
-            nonlocal cached_recommendations
+            """Fetch unified cache data on page load"""
+            nonlocal cached_data, current_persona_id, cached_recommendations
             try:
+                from app.ai.personas import get_random_persona
+
                 # Get last persona from localStorage via JS
                 last_persona = await ui.run_javascript('getLastPersona()')
                 exclude_id = last_persona if last_persona else None
 
-                # Always generate fresh ratings on page load
-                cached_ratings['sup'] = orchestrator.get_fresh_rating('sup', exclude_persona_id=exclude_id)
-                cached_ratings['parawing'] = orchestrator.get_fresh_rating('parawing', exclude_persona_id=exclude_id)
+                # Get unified cache (auto-refreshes if stale)
+                cached_data = orchestrator.get_cached_data()
+
+                # Select a random persona (excluding last one)
+                persona = get_random_persona(exclude_id=exclude_id)
+                current_persona_id = persona["id"]
 
                 # Store the new persona ID
-                if cached_ratings['sup'] and cached_ratings['sup'].persona_id:
-                    await ui.run_javascript(f"setLastPersona('{cached_ratings['sup'].persona_id}')")
+                await ui.run_javascript(f"setLastPersona('{current_persona_id}')")
 
-                cached_recommendations = orchestrator.get_foil_recommendations()
+                # Get foil recommendations from cache
+                if cached_data and cached_data['ratings']['sup'] > 0:
+                    cached_recommendations = orchestrator.get_foil_recommendations(score=cached_data['ratings']['sup'])
+                else:
+                    cached_recommendations = orchestrator.get_foil_recommendations()
             except Exception as e:
                 print(f"Prefetch error: {e}")
 
@@ -280,11 +293,16 @@ async def index():
             """Update display based on toggle selection using cached data"""
             try:
                 mode = 'sup' if toggle.value == 'SUP Foil' else 'parawing'
-                rating = cached_ratings.get(mode)
 
-                if rating:
-                    rating_label.content = f'<div class="rating">{rating.score}/10</div>'
-                    description_label.content = f'<div class="description">{rating.description}</div>'
+                if cached_data and current_persona_id:
+                    # Get rating from unified cache
+                    score = cached_data['ratings'][mode]
+
+                    # Get random variation for current persona
+                    description = orchestrator.get_random_variation(mode, current_persona_id)
+
+                    rating_label.content = f'<div class="rating">{score}/10</div>'
+                    description_label.content = f'<div class="description">{description}</div>'
                 else:
                     rating_label.content = '<div class="rating">N/A</div>'
                     description_label.content = '<div class="description">Weather data unavailable. Try again later or just send it.</div>'
