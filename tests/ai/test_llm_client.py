@@ -1,7 +1,7 @@
 # ABOUTME: Tests for LLM client interface (Google Gemini API)
 # ABOUTME: Uses mocked responses to avoid real API calls and costs in tests
 
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, MagicMock
 from app.ai.llm_client import LLMClient
 
 
@@ -73,3 +73,87 @@ def test_llm_client_accepts_persona():
         # Verify persona prompt was included in the call
         call_args = mock_model.generate_content.call_args[0][0]
         assert PERSONAS[0]["prompt_style"] in call_args or PERSONAS[0]["name"] in call_args
+
+
+def test_uses_gemini_2_5_flash_lite_model():
+    """Verify we're using the correct model"""
+    with patch('app.ai.llm_client.genai') as mock_genai:
+        mock_genai.GenerativeModel.return_value = MagicMock()
+
+        client = LLMClient(api_key="test-key")
+
+        mock_genai.GenerativeModel.assert_called_once_with("gemini-2.5-flash-lite")
+
+
+class TestBatchVariationGeneration:
+    """Tests for generating all persona variations in one API call"""
+
+    def test_generate_all_variations_returns_dict_structure(self):
+        """Batch generation returns variations keyed by persona"""
+        with patch('app.ai.llm_client.genai') as mock_genai:
+            # Mock the API response with our expected format
+            mock_response = MagicMock()
+            mock_response.text = """===PERSONA:drill_sergeant===
+1. First drill sergeant response for testing.
+2. Second drill sergeant response here.
+3. Third one with some variety.
+===PERSONA:disappointed_dad===
+1. First disappointed dad response.
+2. Second disappointed dad here.
+3. Third dad response."""
+
+            mock_model = MagicMock()
+            mock_model.generate_content.return_value = mock_response
+            mock_genai.GenerativeModel.return_value = mock_model
+
+            client = LLMClient(api_key="test-key")
+            result = client.generate_all_variations(
+                wind_speed=15.0,
+                wind_direction="N",
+                wave_height=2.5,
+                swell_direction="NE",
+                rating=7,
+                mode="sup"
+            )
+
+            assert "drill_sergeant" in result
+            assert "disappointed_dad" in result
+            assert len(result["drill_sergeant"]) == 3
+            assert len(result["disappointed_dad"]) == 3
+            assert "First drill sergeant" in result["drill_sergeant"][0]
+
+    def test_generate_all_variations_handles_api_error(self):
+        """Returns empty dict on API failure"""
+        with patch('app.ai.llm_client.genai') as mock_genai:
+            mock_model = MagicMock()
+            mock_model.generate_content.side_effect = Exception("API Error")
+            mock_genai.GenerativeModel.return_value = mock_model
+
+            client = LLMClient(api_key="test-key")
+            result = client.generate_all_variations(
+                wind_speed=15.0,
+                wind_direction="N",
+                wave_height=2.5,
+                swell_direction="NE",
+                rating=7,
+                mode="sup"
+            )
+
+            assert result == {}
+
+    def test_parse_variations_response_extracts_all_personas(self):
+        """Parser correctly splits response into persona dict"""
+        response = """===PERSONA:drill_sergeant===
+1. Response one.
+2. Response two.
+===PERSONA:angry_coach===
+1. Coach response one.
+2. Coach response two.
+3. Coach response three."""
+
+        from app.ai.llm_client import parse_variations_response
+        result = parse_variations_response(response)
+
+        assert len(result["drill_sergeant"]) == 2
+        assert len(result["angry_coach"]) == 3
+        assert "Response one" in result["drill_sergeant"][0]
