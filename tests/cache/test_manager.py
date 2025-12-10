@@ -116,3 +116,149 @@ class TestUnifiedCache:
         manager.set_cache(cache_data)
 
         assert manager.is_stale() is False
+
+
+class TestSplitCache:
+    """Tests for split cache with separate TTLs"""
+
+    def test_sensor_cache_separate_from_variations(self):
+        """Sensor and variations have independent staleness"""
+        from app.weather.models import SensorReading
+
+        manager = CacheManager(
+            sensor_ttl_seconds=120,
+            variations_ttl_minutes=15
+        )
+
+        # Set sensor data
+        reading = SensorReading(
+            wind_speed_kts=15.0,
+            wind_gust_kts=18.0,
+            wind_lull_kts=12.0,
+            wind_direction="N",
+            wind_degrees=0,
+            air_temp_f=75.0,
+            timestamp_utc=datetime.now(timezone.utc),
+            spot_name="Test"
+        )
+        manager.set_sensor(reading, ratings={"sup": 7, "parawing": 8})
+
+        # Set variations
+        manager.set_variations(
+            rating_snapshot={"sup": 7, "parawing": 8},
+            variations={"sup": {"persona": ["test"]}, "parawing": {}}
+        )
+
+        assert manager.is_sensor_stale() is False
+        assert manager.is_variations_stale() is False
+
+    def test_sensor_stale_after_ttl(self):
+        """Sensor cache becomes stale after TTL"""
+        from app.weather.models import SensorReading
+
+        manager = CacheManager(sensor_ttl_seconds=120)
+
+        # Set sensor data with old fetch time
+        reading = SensorReading(
+            wind_speed_kts=15.0,
+            wind_gust_kts=18.0,
+            wind_lull_kts=12.0,
+            wind_direction="N",
+            wind_degrees=0,
+            air_temp_f=75.0,
+            timestamp_utc=datetime.now(timezone.utc),
+            spot_name="Test"
+        )
+
+        # Manually set old fetch timestamp
+        manager._sensor_cache = {
+            "reading": reading,
+            "ratings": {"sup": 7, "parawing": 8},
+            "fetched_at": datetime.now(timezone.utc) - timedelta(seconds=180)
+        }
+
+        assert manager.is_sensor_stale() is True
+
+    def test_variations_stale_when_rating_changes(self):
+        """Variations become stale when rating differs from snapshot"""
+        manager = CacheManager()
+
+        # Set variations with rating snapshot
+        manager.set_variations(
+            rating_snapshot={"sup": 7, "parawing": 8},
+            variations={"sup": {"persona": ["test"]}, "parawing": {}}
+        )
+
+        # Check staleness with different current rating
+        assert manager.should_regenerate_variations(current_ratings={"sup": 8, "parawing": 8}) is True
+
+    def test_variations_fresh_when_rating_same(self):
+        """Variations stay fresh when rating matches snapshot"""
+        manager = CacheManager()
+
+        manager.set_variations(
+            rating_snapshot={"sup": 7, "parawing": 8},
+            variations={"sup": {"persona": ["test"]}, "parawing": {}}
+        )
+
+        assert manager.should_regenerate_variations(current_ratings={"sup": 7, "parawing": 8}) is False
+
+    def test_get_sensor_returns_none_when_stale(self):
+        """get_sensor returns None when sensor cache is stale"""
+        manager = CacheManager(sensor_ttl_seconds=120)
+
+        manager._sensor_cache = {
+            "reading": None,
+            "ratings": {"sup": 5, "parawing": 5},
+            "fetched_at": datetime.now(timezone.utc) - timedelta(seconds=180)
+        }
+
+        assert manager.get_sensor() is None
+
+    def test_offline_state_stored_separately(self):
+        """Offline state is tracked in sensor cache"""
+        from app.weather.models import SensorReading
+
+        manager = CacheManager()
+
+        # Store offline state with last known reading
+        last_reading = SensorReading(
+            wind_speed_kts=15.0,
+            wind_gust_kts=18.0,
+            wind_lull_kts=12.0,
+            wind_direction="N",
+            wind_degrees=0,
+            air_temp_f=75.0,
+            timestamp_utc=datetime.now(timezone.utc) - timedelta(minutes=10),
+            spot_name="Test"
+        )
+
+        manager.set_offline(last_known_reading=last_reading)
+
+        assert manager.is_offline() is True
+        assert manager.get_last_known_reading() is not None
+        assert manager.get_last_known_reading().wind_speed_kts == 15.0
+
+    def test_clear_offline_when_fresh_data(self):
+        """Setting fresh sensor data clears offline state"""
+        from app.weather.models import SensorReading
+
+        manager = CacheManager()
+
+        manager.set_offline(last_known_reading=None)
+        assert manager.is_offline() is True
+
+        # Set fresh reading
+        reading = SensorReading(
+            wind_speed_kts=15.0,
+            wind_gust_kts=18.0,
+            wind_lull_kts=12.0,
+            wind_direction="N",
+            wind_degrees=0,
+            air_temp_f=75.0,
+            timestamp_utc=datetime.now(timezone.utc),
+            spot_name="Test"
+        )
+        manager.set_sensor(reading, ratings={"sup": 7, "parawing": 8})
+
+        assert manager.is_offline() is False
