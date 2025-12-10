@@ -2,7 +2,8 @@
 # ABOUTME: Converts weather conditions into 1-10 ratings using location-specific rules
 
 import logging
-from app.weather.models import WeatherConditions
+from typing import Optional
+from app.weather.models import WeatherConditions, SensorReading
 from app.config import Config
 
 log = logging.getLogger(__name__)
@@ -140,4 +141,80 @@ class ScoreCalculator:
             score += 0.5
 
         # Clamp to 1-10
+        return max(1, min(10, int(round(score))))
+
+    def calculate_sup_score_from_sensor(
+        self,
+        reading: SensorReading,
+        wave_height_ft: Optional[float] = None,
+        swell_direction: Optional[str] = None
+    ) -> int:
+        """
+        Calculate SUP foil score from sensor reading.
+        Wind is the primary factor. Wave data is optional.
+        """
+        score = 5.0  # Start neutral
+
+        # Wind speed scoring (dominant factor)
+        wind = reading.wind_speed_kts
+        if Config.OPTIMAL_WIND_MIN <= wind <= Config.OPTIMAL_WIND_MAX:
+            score += 2  # Perfect wind (15-25kt)
+        elif 12 <= wind < Config.OPTIMAL_WIND_MIN:
+            score -= 0.5  # Marginal
+        elif 8 <= wind < 12:
+            score -= 1.5  # Small - challenging
+        elif wind < 8:
+            score -= 3  # Too light
+        elif wind > Config.OPTIMAL_WIND_MAX:
+            score -= 1  # Too strong
+
+        # Wind direction scoring
+        if reading.wind_direction in Config.OPTIMAL_WIND_DIRECTIONS:
+            score += 1.5  # Perfect (N, S)
+        elif reading.wind_direction in Config.GOOD_WIND_DIRECTIONS:
+            score += 0.5  # Good (NE, SE, NW, SW)
+        elif reading.wind_direction in Config.OK_WIND_DIRECTIONS:
+            score += 0  # OK
+        elif reading.wind_direction in Config.BAD_WIND_DIRECTIONS:
+            score -= 2  # Bad (E, W)
+        else:
+            score -= 1  # Unknown
+
+        # Wave modifier (when available)
+        if wave_height_ft is not None:
+            if Config.OPTIMAL_WAVE_MIN <= wave_height_ft <= Config.OPTIMAL_WAVE_MAX:
+                score += 1
+            elif 1.5 <= wave_height_ft < Config.OPTIMAL_WAVE_MIN:
+                score += 0.5
+            elif 1 <= wave_height_ft < 1.5:
+                score -= 0.5
+            elif wave_height_ft < 1:
+                score -= 1
+            elif wave_height_ft > Config.OPTIMAL_WAVE_MAX:
+                score -= 1
+
+        return max(1, min(10, int(round(score))))
+
+    def calculate_parawing_score_from_sensor(
+        self,
+        reading: SensorReading,
+        wave_height_ft: Optional[float] = None,
+        swell_direction: Optional[str] = None
+    ) -> int:
+        """
+        Calculate parawing score from sensor reading.
+        Parawing requires more wind - below 15kt is essentially un-rideable.
+        """
+        score = float(self.calculate_sup_score_from_sensor(reading, wave_height_ft, swell_direction))
+
+        wind = reading.wind_speed_kts
+        if wind < 15:
+            score = min(score, 4)
+            score -= (15 - wind) * 0.5
+        elif wind >= 18:
+            score += 1
+
+        if wind >= 18 and wave_height_ft is not None and wave_height_ft >= 1.5:
+            score += 0.5
+
         return max(1, min(10, int(round(score))))
