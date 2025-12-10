@@ -208,26 +208,41 @@ async def index():
             """Populate and show the WHY dialog"""
             conditions_container.clear()
 
-            # Use cached weather data
             if cached_data:
+                is_offline = cached_data.get("is_offline", False)
                 weather_raw = cached_data.get('weather', {})
                 timestamp = cached_data.get('timestamp')
 
                 with conditions_container:
-                    # Render crayon graph
-                    graph = CrayonGraph()
-                    wind_dir = weather_raw.get('wind_direction', 'N')
-                    svg = graph.render(wind_direction=wind_dir)
+                    if is_offline:
+                        ui.label('--- SENSOR OFFLINE ---').style('font-size: 18px; font-weight: bold; color: #c00; margin-bottom: 8px;')
 
-                    # Display graph
-                    ui.html(svg, sanitize=False).style('width: 100%; display: flex; justify-content: center; margin: 20px 0;')
+                        last_known = cached_data.get("last_known_reading")
+                        if last_known:
+                            ui.label(f"Last reading: {last_known.wind_speed_kts:.1f}kts {last_known.wind_direction}").style('font-size: 14px; color: #666;')
+                    else:
+                        # Render crayon graph
+                        graph = CrayonGraph()
+                        wind_dir = weather_raw.get('wind_direction', 'N')
+                        svg = graph.render(wind_direction=wind_dir)
 
-                    ui.label('--- CONDITIONS ---').style('font-size: 18px; font-weight: bold; margin-bottom: 8px;')
-                    ui.label(f"Wind: {weather_raw['wind_speed']:.1f} kts {weather_raw['wind_direction']}").style('font-size: 16px;')
-                    ui.label(f"Waves: {weather_raw['wave_height']:.1f} ft").style('font-size: 16px;')
-                    ui.label(f"Swell: {weather_raw['swell_direction']}").style('font-size: 16px;')
-                    if timestamp:
-                        ui.label(f"Data from: {timestamp.strftime('%Y-%m-%d %H:%M UTC')}").style('font-size: 12px; color: #666; margin-top: 8px;')
+                        ui.html(svg, sanitize=False).style('width: 100%; display: flex; justify-content: center; margin: 20px 0;')
+
+                        ui.label('--- CONDITIONS ---').style('font-size: 18px; font-weight: bold; margin-bottom: 8px;')
+                        ui.label(f"Wind: {weather_raw.get('wind_speed', 0):.1f} kts {weather_raw.get('wind_direction', 'N')}").style('font-size: 16px;')
+
+                        # Show gust/lull if available
+                        if weather_raw.get('wind_gust'):
+                            ui.label(f"Gusts: {weather_raw['wind_gust']:.1f} kts / Lulls: {weather_raw.get('wind_lull', 0):.1f} kts").style('font-size: 14px; color: #666;')
+
+                        if weather_raw.get('air_temp'):
+                            ui.label(f"Air Temp: {weather_raw['air_temp']:.0f}°F").style('font-size: 14px; color: #666;')
+
+                        # Note about no wave data
+                        ui.label('Wave/swell data not available from sensor').style('font-size: 12px; color: #999; font-style: italic; margin-top: 8px;')
+
+                        if timestamp:
+                            ui.label(f"Data from: {timestamp.strftime('%Y-%m-%d %H:%M UTC')}").style('font-size: 12px; color: #666; margin-top: 8px;')
             else:
                 with conditions_container:
                     ui.label('Weather data unavailable').style('font-size: 16px; color: #666;')
@@ -294,30 +309,73 @@ async def index():
             try:
                 mode = 'sup' if toggle.value == 'SUP Foil' else 'parawing'
 
-                if cached_data and current_persona_id:
-                    # Get rating from unified cache
-                    score = cached_data['ratings'][mode]
+                if cached_data:
+                    is_offline = cached_data.get("is_offline", False)
 
-                    # Get random variation for current persona
-                    description = orchestrator.get_random_variation(mode, current_persona_id)
+                    if is_offline:
+                        # OFFLINE STATE
+                        rating_label.content = '<div class="rating" style="color: #999;">OFFLINE</div>'
 
-                    rating_label.content = f'<div class="rating">{score}/10</div>'
-                    description_label.content = f'<div class="description">{description}</div>'
+                        # Get offline variation
+                        description = orchestrator.get_random_variation(mode, current_persona_id)
+                        description_label.content = f'<div class="description">{description}</div>'
+
+                        # Show last known info
+                        last_known = cached_data.get("last_known_reading")
+                        if last_known:
+                            from datetime import datetime, timezone, timedelta
+                            from zoneinfo import ZoneInfo
+
+                            # Calculate how long ago
+                            now = datetime.now(timezone.utc)
+                            age = now - last_known.timestamp_utc
+                            age_minutes = int(age.total_seconds() / 60)
+
+                            if age_minutes < 60:
+                                age_str = f"{age_minutes} min ago"
+                            else:
+                                age_str = f"{age_minutes // 60}h {age_minutes % 60}m ago"
+
+                            timestamp_label.content = (
+                                f'<div class="timestamp" style="color: #c00;">'
+                                f'Sensor offline - Last reading: {last_known.wind_speed_kts:.0f}kts '
+                                f'{last_known.wind_direction} ({age_str})'
+                                f'</div>'
+                            )
+                        else:
+                            timestamp_label.content = '<div class="timestamp" style="color: #c00;">Sensor offline - No recent data</div>'
+
+                        # Hide recommendations when offline
+                        code_rec.content = '<div class="rec-item">CODE: --</div>'
+                        kt_rec.content = '<div class="rec-item">KT: --</div>'
+
+                    else:
+                        # ONLINE STATE
+                        if current_persona_id:
+                            score = cached_data['ratings'][mode]
+                            description = orchestrator.get_random_variation(mode, current_persona_id)
+
+                            rating_label.content = f'<div class="rating">{score}/10</div>'
+                            description_label.content = f'<div class="description">{description}</div>'
+                        else:
+                            rating_label.content = '<div class="rating">N/A</div>'
+                            description_label.content = '<div class="description">Weather data unavailable.</div>'
+
+                        # Update foil recommendations
+                        if cached_recommendations:
+                            code_rec.content = f'<div class="rec-item">CODE: {cached_recommendations["code"]}</div>'
+                            kt_rec.content = f'<div class="rec-item">KT: {cached_recommendations["kt"]}</div>'
+
+                        # Update timestamp
+                        from datetime import datetime
+                        from zoneinfo import ZoneInfo
+
+                        est_time = datetime.now(ZoneInfo("America/New_York"))
+                        timestamp_label.content = f'<div class="timestamp">Last updated: {est_time.strftime("%I:%M %p")} EST</div>'
+
                 else:
                     rating_label.content = '<div class="rating">N/A</div>'
-                    description_label.content = '<div class="description">Weather data unavailable. Try again later or just send it.</div>'
-
-                # Update foil recommendations from cache
-                if cached_recommendations:
-                    code_rec.content = f'<div class="rec-item">CODE: {cached_recommendations["code"]}</div>'
-                    kt_rec.content = f'<div class="rec-item">KT: {cached_recommendations["kt"]}</div>'
-
-                # Update timestamp
-                from datetime import datetime
-                from zoneinfo import ZoneInfo
-
-                est_time = datetime.now(ZoneInfo("America/New_York"))
-                timestamp_label.content = f'<div class="timestamp">Last updated: {est_time.strftime("%I:%M %p")} EST</div>'
+                    description_label.content = '<div class="description">Weather data unavailable. Try again later.</div>'
 
             except Exception as e:
                 print(f"UI update error: {e}")
