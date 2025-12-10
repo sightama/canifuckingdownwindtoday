@@ -47,3 +47,45 @@ def test_config_has_correct_wind_directions_for_jupiter():
     # Bad directions should be explicitly listed
     assert "E" in Config.BAD_WIND_DIRECTIONS
     assert "W" in Config.BAD_WIND_DIRECTIONS
+
+
+class TestSensorConfig:
+    """Tests for sensor-related configuration"""
+
+    def test_wf_token_from_environment(self):
+        """WF_TOKEN is read from environment"""
+        import os
+        from importlib import reload
+
+        # Set env var
+        os.environ["WF_TOKEN"] = "test-token-123"
+
+        # Reload config to pick up new env var
+        import app.config
+        reload(app.config)
+        from app.config import Config
+
+        assert Config.WF_TOKEN == "test-token-123"
+
+        # Cleanup
+        del os.environ["WF_TOKEN"]
+
+    def test_sensor_stale_threshold_default(self):
+        """SENSOR_STALE_THRESHOLD_SECONDS has sensible default"""
+        from app.config import Config
+
+        # Default is 300 seconds (5 minutes)
+        assert Config.SENSOR_STALE_THRESHOLD_SECONDS == 300
+
+    def test_sensor_cache_ttl_default(self):
+        """SENSOR_CACHE_TTL_SECONDS has sensible default"""
+        from app.config import Config
+
+        # Default is 120 seconds (2 minutes)
+        assert Config.SENSOR_CACHE_TTL_SECONDS == 120
+
+    def test_wf_spot_id_default(self):
+        """WF_SPOT_ID defaults to Jupiter-Juno Beach Pier"""
+        from app.config import Config
+
+        assert Config.WF_SPOT_ID == "453"
