@@ -17,16 +17,17 @@
 | Task 1: Switch to Gemini 2.5 Flash-Lite | ✅ DONE | `a410437`, `b9bbbb7` |
 | Task 2: Create Unified Cache Structure | ✅ DONE | `9dcac5e` |
 | Task 3: Add Batch Variation Generation | ✅ DONE | `4b68eb0` |
-| Task 4: Unified Refresh in Orchestrator | ⏳ PENDING | - |
-| Task 5: Update main.py | ⏳ PENDING | - |
+| Task 4: Unified Refresh in Orchestrator | ✅ DONE | (already implemented) |
+| Task 5: Update main.py | ✅ DONE | `a73ea39` |
 | Task 6: Clean Up Old Code | ⏳ PENDING | - |
 | Task 7: Integration Testing | ⏳ PENDING | - |
 | Task 8: Deploy and Verify | ⏳ PENDING | - |
 
 **Notes:**
-- Tasks 1-3 complete and code reviewed
-- Old cache tests (4 tests) fail as expected - using deprecated API, will fix in Task 6
-- Orchestrator still uses old cache API (set_rating/get_rating) - will update in Task 4
+- Tasks 1-5 complete
+- Task 4 was already implemented in the orchestrator (get_cached_data, get_random_variation methods exist)
+- Old cache tests (10 tests) fail as expected - using deprecated API, will fix in Task 6
+- Orchestrator has BOTH old API (set_rating/get_rating) and new API (get_cached_data) - old methods need cleanup in Task 6
 
 ---
 
