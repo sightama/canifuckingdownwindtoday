@@ -1,5 +1,5 @@
 # ABOUTME: LLM API client for generating condition descriptions
-# ABOUTME: Supports Google Gemini 2.0 Flash with persona-based prompts
+# ABOUTME: Supports Google Gemini 2.5 Flash-Lite with persona-based prompts
 
 import google.generativeai as genai
 from typing import Optional
