@@ -1,171 +1,193 @@
 # ABOUTME: Main application orchestrator coordinating all components
-# ABOUTME: Handles weather fetch, scoring, LLM generation, caching, and foil recommendations
+# ABOUTME: Handles sensor fetch, scoring, LLM generation, caching, and offline state
 
-from typing import Optional
-from datetime import datetime, timezone
+import logging
 import random
+from datetime import datetime, timezone
+from typing import Optional
+
 from app.config import Config
-from app.weather.fetcher import WeatherFetcher
+from app.weather.sensor import SensorClient
+from app.weather.models import SensorReading
 from app.scoring.calculator import ScoreCalculator
 from app.scoring.foil_recommender import FoilRecommender
 from app.ai.llm_client import LLMClient
 from app.cache.manager import CacheManager
 from app.debug import debug_log
 
+log = logging.getLogger(__name__)
+
 
 class AppOrchestrator:
     """Orchestrates all app components to generate ratings"""
 
     def __init__(self, api_key: str):
-        self.weather_fetcher = WeatherFetcher()
+        self.sensor_client = SensorClient(
+            wf_token=Config.WF_TOKEN,
+            spot_id=Config.WF_SPOT_ID
+        )
         self.score_calculator = ScoreCalculator()
         self.foil_recommender = FoilRecommender()
         self.llm_client = LLMClient(api_key=api_key)
-        self.cache = CacheManager(cache_ttl_minutes=15)
-
-    def get_foil_recommendations(self, score: Optional[int] = None) -> dict:
-        """
-        Get foil recommendations for current conditions.
-
-        Args:
-            score: Optional score to use (if not provided, fetches weather)
-
-        Returns:
-            Dict with CODE and KT recommendations
-        """
-        if score is None:
-            # Fetch conditions to calculate score
-            conditions = self.weather_fetcher.fetch_current_conditions(
-                Config.LOCATION_LAT,
-                Config.LOCATION_LON
-            )
-
-            if not conditions:
-                return {"code": "Weather unavailable", "kt": "Weather unavailable"}
-
-            score = self.score_calculator.calculate_sup_score(conditions)
-
-        return {
-            "code": self.foil_recommender.recommend_code(score=score),
-            "kt": self.foil_recommender.recommend_kt(score=score)
-        }
-
-    def get_weather_context(self) -> Optional[dict]:
-        """
-        Get current weather conditions formatted for display.
-
-        Returns:
-            Dict with wind_speed, wind_direction, wave_height, swell_direction, timestamp
-            or None if weather unavailable
-        """
-        conditions = self.weather_fetcher.fetch_current_conditions(
-            Config.LOCATION_LAT,
-            Config.LOCATION_LON
+        self.cache = CacheManager(
+            sensor_ttl_seconds=Config.SENSOR_CACHE_TTL_SECONDS,
+            variations_ttl_minutes=Config.VARIATIONS_CACHE_TTL_MINUTES
         )
-
-        if not conditions:
-            return None
-
-        return {
-            "wind_speed": f"{conditions.wind_speed_kts:.1f} kts",
-            "wind_direction": conditions.wind_direction,
-            "wave_height": f"{conditions.wave_height_ft:.1f} ft",
-            "swell_direction": conditions.swell_direction,
-            "timestamp": conditions.timestamp
-        }
 
     def get_cached_data(self) -> dict:
         """
-        Get all data from unified cache. Refreshes if stale.
+        Get current data, fetching from sensor if needed.
 
         Returns:
             {
-                "timestamp": datetime,
-                "weather": {...},
-                "ratings": {"sup": int, "parawing": int},
-                "variations": {"sup": {...}, "parawing": {...}}
+                "is_offline": bool,
+                "timestamp": datetime or None,
+                "last_known_reading": SensorReading or None,
+                "weather": {...} or None,
+                "ratings": {"sup": int, "parawing": int} or None,
+                "variations": {...}
             }
         """
-        if self.cache.is_stale():
-            self._refresh_cache()
+        # Check if sensor cache needs refresh
+        if self.cache.is_sensor_stale():
+            self._refresh_sensor()
 
-        cached = self.cache.get_cache()
-        if cached is None:
-            # This shouldn't happen after refresh, but handle gracefully
-            self._refresh_cache()
-            cached = self.cache.get_cache()
+        # Check if we're offline
+        if self.cache.is_offline():
+            return self._build_offline_response()
 
-        return cached or self._empty_cache_data()
+        # Get current ratings
+        current_ratings = self.cache.get_ratings()
 
-    def _refresh_cache(self) -> None:
-        """
-        Fetch fresh weather, calculate ratings, generate all variations.
-        Stores everything in unified cache.
-        """
-        # Fetch weather ONCE
-        conditions = self.weather_fetcher.fetch_current_conditions(
-            Config.LOCATION_LAT,
-            Config.LOCATION_LON
-        )
+        # Check if variations need refresh (rating changed or TTL expired)
+        if current_ratings and self.cache.should_regenerate_variations(current_ratings):
+            self._refresh_variations(current_ratings)
 
-        if conditions is None:
-            debug_log("Weather fetch failed, using empty cache", "ORCHESTRATOR")
-            self.cache.set_cache(self._empty_cache_data())
+        return self._build_online_response()
+
+    def _refresh_sensor(self) -> None:
+        """Fetch fresh sensor data and calculate ratings."""
+        debug_log("Refreshing sensor data", "ORCHESTRATOR")
+
+        reading = self.sensor_client.fetch()
+
+        if reading is None:
+            log.warning("Sensor fetch returned None - marking offline")
+            self.cache.set_offline(self.cache.get_last_known_reading())
+            self._ensure_offline_variations()
             return
 
-        weather_data = {
-            "wind_speed": conditions.wind_speed_kts,
-            "wind_direction": conditions.wind_direction,
-            "wave_height": conditions.wave_height_ft,
-            "swell_direction": conditions.swell_direction
-        }
+        # Check if reading itself is stale (sensor hasn't updated)
+        if reading.is_stale(threshold_seconds=Config.SENSOR_STALE_THRESHOLD_SECONDS):
+            log.warning(f"Sensor reading is stale: {reading.timestamp_utc}")
+            self.cache.set_offline(reading)
+            self._ensure_offline_variations()
+            return
 
-        # Calculate ratings for both modes
-        sup_score = self.score_calculator.calculate_sup_score(conditions)
-        parawing_score = self.score_calculator.calculate_parawing_score(conditions)
+        # Calculate ratings
+        sup_score = self.score_calculator.calculate_sup_score_from_sensor(reading)
+        parawing_score = self.score_calculator.calculate_parawing_score_from_sensor(reading)
 
         ratings = {
             "sup": sup_score,
             "parawing": parawing_score
         }
 
-        # Generate variations for both modes
+        self.cache.set_sensor(reading, ratings)
+        debug_log(f"Sensor cache updated: {reading.wind_speed_kts}kts {reading.wind_direction}", "ORCHESTRATOR")
+
+    def _refresh_variations(self, ratings: dict[str, int]) -> None:
+        """Generate fresh LLM variations for current ratings."""
+        debug_log(f"Refreshing variations for ratings: {ratings}", "ORCHESTRATOR")
+
+        sensor_data = self.cache.get_sensor()
+        if not sensor_data or not sensor_data.get("reading"):
+            return
+
+        reading = sensor_data["reading"]
         variations = {"sup": {}, "parawing": {}}
 
         for mode in ["sup", "parawing"]:
             mode_variations = self.llm_client.generate_all_variations(
-                wind_speed=conditions.wind_speed_kts,
-                wind_direction=conditions.wind_direction,
-                wave_height=conditions.wave_height_ft,
-                swell_direction=conditions.swell_direction,
+                wind_speed=reading.wind_speed_kts,
+                wind_direction=reading.wind_direction,
+                wave_height=0,  # No wave data from sensor
+                swell_direction="N",
                 rating=ratings[mode],
                 mode=mode
             )
             variations[mode] = mode_variations
 
-        # Store everything together
-        cache_data = {
-            "timestamp": datetime.now(timezone.utc),
-            "weather": weather_data,
+        self.cache.set_variations(ratings, variations)
+        debug_log(f"Variations cached: {sum(len(v) for v in variations['sup'].values())} SUP responses", "ORCHESTRATOR")
+
+    def _ensure_offline_variations(self) -> None:
+        """Generate offline variations if not already cached."""
+        existing = self.cache.get_offline_variations("sup", "drill_sergeant")
+        if existing:
+            return  # Already have offline variations
+
+        debug_log("Generating offline variations", "ORCHESTRATOR")
+        offline_variations = self.llm_client.generate_offline_variations()
+
+        if offline_variations:
+            self.cache.set_offline_variations({
+                "sup": offline_variations,
+                "parawing": offline_variations  # Same variations for both modes
+            })
+
+    def _build_offline_response(self) -> dict:
+        """Build response dict for offline state."""
+        last_known = self.cache.get_last_known_reading()
+
+        return {
+            "is_offline": True,
+            "timestamp": last_known.timestamp_utc if last_known else None,
+            "last_known_reading": last_known,
+            "weather": self._reading_to_weather_dict(last_known) if last_known else None,
+            "ratings": None,
+            "variations": {
+                "sup": {},
+                "parawing": {}
+            }
+        }
+
+    def _build_online_response(self) -> dict:
+        """Build response dict for online state."""
+        sensor_data = self.cache.get_sensor()
+        reading = sensor_data.get("reading") if sensor_data else None
+        ratings = sensor_data.get("ratings") if sensor_data else {}
+        fetched_at = sensor_data.get("fetched_at") if sensor_data else None
+
+        variations_cache = self.cache.get_all_variations()
+        variations = variations_cache.get("variations", {}) if variations_cache else {}
+
+        return {
+            "is_offline": False,
+            "timestamp": fetched_at,
+            "last_known_reading": reading,
+            "weather": self._reading_to_weather_dict(reading) if reading else None,
             "ratings": ratings,
             "variations": variations
         }
 
-        self.cache.set_cache(cache_data)
-        debug_log(f"Cache refreshed with {sum(len(v) for v in variations['sup'].values())} SUP variations", "ORCHESTRATOR")
-
-    def _empty_cache_data(self) -> dict:
-        """Return empty cache structure for error cases."""
+    def _reading_to_weather_dict(self, reading: SensorReading) -> dict:
+        """Convert SensorReading to weather dict for display."""
         return {
-            "timestamp": datetime.now(timezone.utc),
-            "weather": {"wind_speed": 0, "wind_direction": "N", "wave_height": 0, "swell_direction": "N"},
-            "ratings": {"sup": 0, "parawing": 0},
-            "variations": {"sup": {}, "parawing": {}}
+            "wind_speed": reading.wind_speed_kts,
+            "wind_direction": reading.wind_direction,
+            "wind_gust": reading.wind_gust_kts,
+            "wind_lull": reading.wind_lull_kts,
+            "air_temp": reading.air_temp_f,
+            "wave_height": 0,  # No wave data from sensor
+            "swell_direction": "N"  # No swell data from sensor
         }
 
     def get_random_variation(self, mode: str, persona_id: str) -> str:
         """
         Get a random variation for the given mode and persona.
+
+        Handles both online and offline states.
 
         Args:
             mode: "sup" or "parawing"
@@ -174,18 +196,38 @@ class AppOrchestrator:
         Returns:
             Random response string, or fallback if none available.
         """
-        cached = self.get_cached_data()
+        # Check if offline
+        if self.cache.is_offline():
+            variations = self.cache.get_offline_variations(mode, persona_id)
+            if variations:
+                return random.choice(variations)
+            return "Sensor's offline. Can't tell you shit about the conditions right now."
 
-        variations = cached.get("variations", {}).get(mode, {}).get(persona_id, [])
-
+        # Get online variations
+        variations = self.cache.get_variations(mode, persona_id)
         if variations:
             return random.choice(variations)
 
-        # Fallback message
-        weather = cached.get("weather", {})
-        rating = cached.get("ratings", {}).get(mode, 0)
-        return (
-            f"Conditions: {weather.get('wind_speed', 0)}kts {weather.get('wind_direction', 'N')}, "
-            f"{weather.get('wave_height', 0)}ft waves. Rating: {rating}/10. Figure it out yourself."
-        )
+        # Fallback
+        ratings = self.cache.get_ratings() or {}
+        rating = ratings.get(mode, 0)
+        sensor_data = self.cache.get_sensor()
+        reading = sensor_data.get("reading") if sensor_data else None
 
+        if reading:
+            return (
+                f"Conditions: {reading.wind_speed_kts:.1f}kts {reading.wind_direction}. "
+                f"Rating: {rating}/10. Figure it out yourself."
+            )
+        return "No data available. Go look outside."
+
+    def get_foil_recommendations(self, score: Optional[int] = None) -> dict:
+        """Get foil recommendations for current conditions."""
+        if score is None:
+            ratings = self.cache.get_ratings()
+            score = ratings.get("sup", 5) if ratings else 5
+
+        return {
+            "code": self.foil_recommender.recommend_code(score=score),
+            "kt": self.foil_recommender.recommend_kt(score=score)
+        }
