@@ -196,3 +196,55 @@ class TestOfflineVariations:
             result = client.generate_offline_variations()
 
             assert result == {}
+
+
+class TestSinglePersonaVariations:
+    """Tests for generating variations for a single persona"""
+
+    def test_generate_single_persona_variations_returns_list(self):
+        """Single persona generation returns list of variations"""
+        with patch('app.ai.llm_client.genai') as mock_genai:
+            mock_response = MagicMock()
+            mock_response.text = """1. First drill sergeant response for testing.
+2. Second drill sergeant response here.
+3. Third one with some variety.
+4. Fourth response to fill it out."""
+
+            mock_model = MagicMock()
+            mock_model.generate_content.return_value = mock_response
+            mock_genai.GenerativeModel.return_value = mock_model
+
+            client = LLMClient(api_key="test-key")
+            result = client.generate_single_persona_variations(
+                wind_speed=15.0,
+                wind_direction="N",
+                wave_height=0,
+                swell_direction="N",
+                rating=7,
+                mode="sup",
+                persona_id="drill_sergeant"
+            )
+
+            assert isinstance(result, list)
+            assert len(result) == 4
+            assert "First drill sergeant" in result[0]
+
+    def test_generate_single_persona_variations_handles_error(self):
+        """Returns empty list on API failure"""
+        with patch('app.ai.llm_client.genai') as mock_genai:
+            mock_model = MagicMock()
+            mock_model.generate_content.side_effect = Exception("API Error")
+            mock_genai.GenerativeModel.return_value = mock_model
+
+            client = LLMClient(api_key="test-key")
+            result = client.generate_single_persona_variations(
+                wind_speed=15.0,
+                wind_direction="N",
+                wave_height=0,
+                swell_direction="N",
+                rating=7,
+                mode="sup",
+                persona_id="drill_sergeant"
+            )
+
+            assert result == []

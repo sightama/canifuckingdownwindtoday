@@ -175,6 +175,77 @@ PERSONA STYLES:
             print(f"LLM batch API error: {e}")
             return {}
 
+    def generate_single_persona_variations(
+        self,
+        wind_speed: float,
+        wind_direction: str,
+        wave_height: float,
+        swell_direction: str,
+        rating: int,
+        mode: str,
+        persona_id: str,
+        num_variations: int = 4
+    ) -> list[str]:
+        """
+        Generate variations for a SINGLE persona (fast path for initial load).
+
+        Args:
+            wind_speed: Wind speed in knots
+            wind_direction: Wind direction (N, S, E, W, etc.)
+            wave_height: Wave height in feet
+            swell_direction: Swell direction
+            rating: 1-10 rating
+            mode: "sup" or "parawing"
+            persona_id: Single persona ID to generate for
+            num_variations: Number of variations (default 4)
+
+        Returns:
+            List of response strings. Empty list on error.
+        """
+        mode_name = "SUP foil" if mode == "sup" else "parawing"
+
+        # Find the persona
+        persona = next((p for p in PERSONAS if p["id"] == persona_id), None)
+        if not persona:
+            debug_log(f"Unknown persona: {persona_id}", "LLM")
+            return []
+
+        prompt = f"""Generate responses for a foiling conditions rating site.
+Conditions: {wind_speed}kts {wind_direction}, {wave_height}ft waves, {swell_direction} swell.
+Rating: {rating}/10 for {mode_name} foiling in Jupiter, FL.
+
+Write {num_variations} unique 2-3 sentence responses in this character:
+{persona['prompt_style']}
+
+Be viciously aggressive, use profanity including "fuck" and "cunt", roast the reader directly.
+Each response should have a different angle or insult while staying in character.
+
+Format as numbered list:
+1. [response]
+2. [response]
+...
+"""
+
+        debug_log(f"Single persona prompt length: {len(prompt)} chars", "LLM")
+
+        try:
+            response = self.model.generate_content(prompt)
+            debug_log(f"Single persona response length: {len(response.text)} chars", "LLM")
+
+            # Parse numbered list
+            lines = []
+            for line in response.text.strip().split('\n'):
+                line = line.strip()
+                match = re.match(r'^\d+\.\s*(.+)$', line)
+                if match:
+                    lines.append(match.group(1).strip())
+
+            return lines
+        except Exception as e:
+            debug_log(f"Single persona API error: {e}", "LLM")
+            print(f"LLM single persona API error: {e}")
+            return []
+
     def generate_offline_variations(self, num_variations: int = 4) -> dict[str, list[str]]:
         """
         Generate variations for when the sensor is offline.
