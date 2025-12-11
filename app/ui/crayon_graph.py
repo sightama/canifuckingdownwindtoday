@@ -11,7 +11,8 @@ class CrayonGraph:
     Generates a silly hand-drawn SVG showing Florida coast and wind direction.
 
     The coast runs roughly NNW to SSE (340° to 160°).
-    Wind arrow points in the direction wind is going (not coming from).
+    Wind direction (e.g., "N") indicates where wind comes FROM.
+    Arrow points where wind is GOING (e.g., "N" wind points south/down).
     """
 
     # SVG dimensions
@@ -24,11 +25,13 @@ class CrayonGraph:
     COAST_END = (220, 220)
 
     # Wind arrow directions (degrees, 0 = right/east, 90 = down/south)
+    # Wind direction indicates where wind is COMING FROM, so arrow points opposite
+    # (e.g., "N" wind comes from north, so arrow points south/down = 90 degrees)
     DIRECTION_ANGLES = {
-        "N": 270, "NE": 315, "E": 0, "SE": 45,
-        "S": 90, "SW": 135, "W": 180, "NW": 225,
-        "NNW": 247, "NNE": 292, "ENE": 337, "ESE": 22,
-        "SSE": 67, "SSW": 112, "WSW": 157, "WNW": 202,
+        "N": 90, "NE": 135, "E": 180, "SE": 225,
+        "S": 270, "SW": 315, "W": 0, "NW": 45,
+        "NNW": 67, "NNE": 112, "ENE": 157, "ESE": 202,
+        "SSE": 247, "SSW": 292, "WSW": 337, "WNW": 22,
     }
 
     def __init__(self, line_style: LineStyle = "wobbly"):
@@ -40,28 +43,91 @@ class CrayonGraph:
     def render(self, wind_direction: str) -> str:
         random.seed()
 
+        texture_elements = []
         drawing_elements = []
         label_elements = []
 
+        # Land texture (left of coast) - crayon-like dots
+        texture_elements.extend(self._make_land_texture())
+
+        # Ocean texture (right of coast) - wavy lines
+        texture_elements.extend(self._make_ocean_texture())
+
+        # Coast line (blue)
         drawing_elements.append(self._make_wobbly_line(
             self.COAST_START,
             self.COAST_END,
             color="blue",
             stroke_width=4
         ))
-        
+
+        # Wind arrow (red)
         wind_elements = self._make_wind_arrow(wind_direction)
         drawing_elements.extend(wind_elements)
 
-        label_elements.append(self._make_label("coast", (20, 80), pointer_to=(70, 60)))
-        label_elements.append(self._make_label("wind", (220, 180), pointer_to=(160, 140)))
+        # Small title at top
+        label_elements.append(self._make_title("Coastline / Wind", (150, 18)))
 
         svg = f'''<svg width="{self.WIDTH}" height="{self.HEIGHT}" xmlns="http://www.w3.org/2000/svg" style="background: transparent;">
+        <g id="textures">{chr(10).join(texture_elements)}</g>
         <g id="drawings">{chr(10).join(drawing_elements)}</g>
         <g id="labels">{chr(10).join(label_elements)}</g>
     </svg>'''
 
         return svg
+
+    def _make_land_texture(self) -> list[str]:
+        """Generate crayon-like dots representing land (left of coast)."""
+        elements = []
+        # Land is to the left/top-left of the coast line
+        # Coast goes from (80, 30) to (220, 220)
+        # Generate scattered dots in the land area
+        land_dots = [
+            (30, 60), (50, 90), (25, 120), (45, 150), (60, 180),
+            (70, 100), (55, 130), (35, 160), (65, 200), (40, 80),
+            (20, 100), (50, 170), (30, 190), (55, 60), (75, 140),
+        ]
+
+        for x, y in land_dots:
+            # Add slight randomness to position for hand-drawn feel
+            x += random.uniform(-3, 3)
+            y += random.uniform(-3, 3)
+            radius = random.uniform(2, 4)
+            # Green/brown dots for land
+            color = random.choice(["#5d8a4a", "#7cb05c", "#4a6b3a", "#8b7355"])
+            elements.append(
+                f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{radius:.1f}" fill="{color}" opacity="0.7"/>'
+            )
+
+        return elements
+
+    def _make_ocean_texture(self) -> list[str]:
+        """Generate crayon-like waves representing ocean (right of coast)."""
+        elements = []
+        # Ocean is to the right/bottom-right of the coast line
+        # Generate small wavy lines to represent water
+
+        wave_positions = [
+            (240, 60), (260, 90), (230, 120), (250, 150), (270, 180),
+            (220, 80), (245, 110), (265, 140), (235, 170), (255, 200),
+            (275, 100), (240, 190), (260, 50), (280, 130), (225, 145),
+        ]
+
+        for x, y in wave_positions:
+            # Small wavy line (~15px wide)
+            x += random.uniform(-5, 5)
+            y += random.uniform(-5, 5)
+            # Create a small wave shape
+            wave_width = random.uniform(12, 18)
+            wave_height = random.uniform(3, 5)
+            # Simple sine-like wave using quadratic bezier
+            path = f'M {x:.1f} {y:.1f} Q {x + wave_width/4:.1f} {y - wave_height:.1f} {x + wave_width/2:.1f} {y:.1f} Q {x + 3*wave_width/4:.1f} {y + wave_height:.1f} {x + wave_width:.1f} {y:.1f}'
+            color = random.choice(["#4a90d9", "#5da5e8", "#3a7bc8", "#6bb5f0"])
+            elements.append(
+                f'<path d="{path}" stroke="{color}" stroke-width="2" fill="none" opacity="0.6"/>'
+            )
+
+        return elements
 
     def _make_straight_line(
         self,
@@ -185,15 +251,15 @@ class CrayonGraph:
         """Generate wind line with arrow head."""
         elements = []
 
-        # Arrow starts near center of graph
-        center_x, center_y = 150, 120
+        # Arrow positioned over the water (right/ocean side of coast)
+        center_x, center_y = 200, 100
 
         # Get angle for this direction
         angle_deg = self.DIRECTION_ANGLES.get(direction.upper(), 0)
         angle_rad = math.radians(angle_deg)
 
         # Arrow length
-        length = 70
+        length = 85
 
         # Calculate end point
         end_x = center_x + length * math.cos(angle_rad)
@@ -231,52 +297,12 @@ class CrayonGraph:
 
         return elements
 
-    def _make_label(
-        self,
-        text: str,
-        position: tuple[float, float],
-        pointer_to: tuple[float, float]
-    ) -> str:
-        """Create a hand-written style label with pointer line."""
+    def _make_label(self, text: str, color: str, position: tuple[float, float]) -> str:
+        """Create a simple colored text label (no pointer arrow)."""
         x, y = position
-        px, py = pointer_to
+        return f'<text x="{x}" y="{y}" font-family="Comic Sans MS, cursive, sans-serif" font-size="16" fill="{color}" font-weight="600">{text}</text>'
 
-        # Determine start position
-        if text == 'coast':
-            start_pos = (x + 20, y + 20)
-        else:
-            start_pos = (x + 20, y - 20)
-
-        # Wobbly pointer line
-        pointer = self._make_wobbly_line(
-            start_pos,
-            pointer_to,
-            color="#333",
-            stroke_width=2
-        )
-
-        # Arrow head
-        dx = px - start_pos[0]
-        dy = py - start_pos[1]
-        angle_rad = math.atan2(dy, dx)
-
-        head_size = 12
-        head_angle1 = angle_rad + math.radians(150)
-        head_angle2 = angle_rad - math.radians(150)
-
-        head1_end = (
-            px + head_size * math.cos(head_angle1),
-            py + head_size * math.sin(head_angle1)
-        )
-        head2_end = (
-            px + head_size * math.cos(head_angle2),
-            py + head_size * math.sin(head_angle2)
-        )
-
-        head1 = self._make_straight_line(pointer_to, head1_end, color="#333", stroke_width=2)
-        head2 = self._make_straight_line(pointer_to, head2_end, color="#333", stroke_width=2)
-
-        # Text (using a casual font)
-        text_elem = f'<text x="{x}" y="{y}" font-family="Comic Sans MS, cursive, sans-serif" font-size="16" fill="#3d3d3d" font-weight="600">{text}</text>'
-
-        return f'<g>{pointer}{head1}{head2}{text_elem}</g>'
+    def _make_title(self, text: str, position: tuple[float, float]) -> str:
+        """Create a small centered title."""
+        x, y = position
+        return f'<text x="{x}" y="{y}" font-family="Comic Sans MS, cursive, sans-serif" font-size="12" fill="#666" text-anchor="middle">{text}</text>'
