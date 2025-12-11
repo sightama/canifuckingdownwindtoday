@@ -172,18 +172,19 @@ async def index(client: Client):
             # Weather conditions section
             conditions_container = ui.column().style('width: 100%; margin-bottom: 24px; align-items: center;')
 
+            # Foil recommendations (dynamic, updated with conditions)
+            with ui.column().style('width: 100%; margin-bottom: 16px; align-items: center;'):
+                ui.label('--- FOIL RECOMMENDATIONS ---').style('font-size: 18px; font-weight: bold; margin-bottom: 8px;')
+                code_rec = ui.html('<div class="rec-item">CODE: Loading...</div>', sanitize=False)
+                kt_rec = ui.html('<div class="rec-item">KT: Loading...</div>', sanitize=False)
+                ui.label('* Recommendations for 195lb/88kg rider').style(
+                    'font-size: 12px; color: #666; margin-top: 8px; font-style: italic;'
+                )
+
             ui.label('--- LIVE CAMS ---').style('font-size: 18px; font-weight: bold; margin: 16px 0; width: 100%; text-align: center;')
 
             # Video streams section
             with ui.column().style('width: 100%; gap: 16px; align-items: center;'):
-                # Palm Beach Marriott cam
-                ui.label('Palm Beach Marriott').style('font-size: 14px; font-weight: bold;')
-                ui.html('''
-                    <iframe src="https://video-monitoring.com/beachcams/palmbeachmarriott/stream.htm"
-                            style="width: 100%; height: 200px; border: 1px solid #000;"
-                            allow="autoplay" allowfullscreen></iframe>
-                ''', sanitize=False)
-
                 # Jupiter Inlet cam (YouTube)
                 ui.label('Jupiter Inlet').style('font-size: 14px; font-weight: bold;')
                 ui.html('''
@@ -200,9 +201,13 @@ async def index(client: Client):
                             allow="autoplay; encrypted-media" allowfullscreen></iframe>
                 ''', sanitize=False)
 
-            ui.label('* Recommendations for 195lb/88kg rider').style(
-                'font-size: 12px; color: #666; margin-top: 16px; font-style: italic;'
-            )
+                # Palm Beach Marriott cam (no autoplay)
+                ui.label('Palm Beach Marriott').style('font-size: 14px; font-weight: bold;')
+                ui.html('''
+                    <iframe src="https://video-monitoring.com/beachcams/palmbeachmarriott/stream.htm"
+                            style="width: 100%; height: 200px; border: 1px solid #000;"
+                            allow="autoplay" allowfullscreen></iframe>
+                ''', sanitize=False)
 
         def show_why():
             """Populate and show the WHY dialog"""
@@ -242,7 +247,9 @@ async def index(client: Client):
                         ui.label('Wave/swell data not available from sensor').style('font-size: 12px; color: #999; font-style: italic; margin-top: 8px;')
 
                         if timestamp:
-                            ui.label(f"Data from: {timestamp.strftime('%Y-%m-%d %H:%M UTC')}").style('font-size: 12px; color: #666; margin-top: 8px;')
+                            from zoneinfo import ZoneInfo
+                            est_timestamp = timestamp.astimezone(ZoneInfo("America/New_York"))
+                            ui.label(f"Data from: {est_timestamp.strftime('%Y-%m-%d %H:%M EST')}").style('font-size: 12px; color: #666; margin-top: 8px;')
             else:
                 with conditions_container:
                     ui.label('Weather data unavailable').style('font-size: 16px; color: #666;')
@@ -262,12 +269,6 @@ async def index(client: Client):
         rating_label = ui.html('<div class="rating">--/10</div>', sanitize=False)
         description_label = ui.html('<div class="description">Loading conditions...</div>', sanitize=False)
 
-        # Foil recommendations
-        with ui.column().classes('recommendations'):
-            ui.html('<div class="rec-title">--- FOIL RECOMMENDATIONS ---</div>', sanitize=False)
-            code_rec = ui.html('<div class="rec-item">CODE: Loading...</div>', sanitize=False)
-            kt_rec = ui.html('<div class="rec-item">KT: Loading...</div>', sanitize=False)
-
         # Last updated timestamp
         timestamp_label = ui.html('<div class="timestamp">Last updated: --</div>', sanitize=False)
 
@@ -275,6 +276,13 @@ async def index(client: Client):
         cached_data = None
         current_persona_id = None
         cached_recommendations = None
+        client_connected = True
+
+        def on_client_disconnect():
+            nonlocal client_connected
+            client_connected = False
+
+        client.on_disconnect(on_client_disconnect)
 
         async def fast_initial_load():
             """Fast path: fetch sensor + 1 persona only, show page immediately"""
@@ -433,11 +441,8 @@ async def index(client: Client):
             update_display()
             await show_content()
             # Start background refresh after page is visible (if client still connected)
-            try:
+            if client_connected:
                 ui.timer(0.5, background_refresh, once=True)
-            except Exception:
-                # Client disconnected before we could start background refresh - that's fine
-                pass
 
         ui.timer(0.1, initial_load, once=True)
 

@@ -23,33 +23,66 @@ def parse_variations_response(response_text: str) -> dict[str, list[str]]:
     """
     result: dict[str, list[str]] = {}
 
-    # Split on persona markers
-    parts = re.split(r'===PERSONA:(\w+)===', response_text)
+    # Try multiple parsing strategies
+
+    # Strategy 1: Split on persona markers (flexible format)
+    # Handles: ===PERSONA:id===, **===PERSONA:id===**, ## PERSONA: id, etc.
+    parts = re.split(r'[=\*#\s]*PERSONA[:\s]+(\w+)[=\*#\s]*', response_text, flags=re.IGNORECASE)
 
     # parts[0] is empty or preamble, then alternating: persona_id, content, persona_id, content...
     for i in range(1, len(parts), 2):
         if i + 1 < len(parts):
-            persona_id = parts[i].strip()
+            persona_id = parts[i].strip().lower()
             content = parts[i + 1].strip()
 
             # Extract numbered responses - handle various LLM formatting quirks
-            lines = []
-            for line in content.split('\n'):
-                line = line.strip()
-                # Match various formats: "1. text", "**1.** text", "1) text", "1: text"
-                match = re.match(r'^[\*]*(\d+)[\.\)\:][\*]*\s*(.+)$', line)
-                if match:
-                    text = match.group(2).strip()
-                    # Remove markdown formatting from the text
-                    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)  # Bold
-                    text = re.sub(r'\*(.+?)\*', r'\1', text)  # Italic
-                    if text:
-                        lines.append(text)
+            lines = _extract_numbered_lines(content)
 
             if lines:
                 result[persona_id] = lines
 
+    # If strategy 1 failed, try looking for persona names as headers
+    if not result:
+        debug_log("Batch parsing strategy 1 failed, trying strategy 2", "LLM")
+        # Look for persona names followed by content
+        from app.ai.personas import PERSONAS
+        persona_ids = [p['id'] for p in PERSONAS]
+
+        for persona_id in persona_ids:
+            # Find this persona's section
+            pattern = rf'(?:^|\n)[#\*\s]*{re.escape(persona_id)}[#\*:\s]*\n(.*?)(?=(?:\n[#\*\s]*(?:{"|".join(persona_ids)})[#\*:\s]*\n)|$)'
+            match = re.search(pattern, response_text, re.IGNORECASE | re.DOTALL)
+            if match:
+                content = match.group(1).strip()
+                lines = _extract_numbered_lines(content)
+                if lines:
+                    result[persona_id] = lines
+
+    if not result:
+        debug_log(f"Batch parsing failed. Response preview: {response_text[:500]}", "LLM")
+
     return result
+
+
+def _extract_numbered_lines(content: str) -> list[str]:
+    """Extract numbered list items from content."""
+    lines = []
+    for line in content.split('\n'):
+        line = line.strip()
+        # Match various formats: "1. text", "**1.** text", "1) text", "1: text", "- text"
+        match = re.match(r'^[\*\-]*\s*(\d+)?[\.\)\:\-]*\s*(.+)$', line)
+        if match:
+            text = match.group(2).strip()
+            # Skip if it's just a header or empty
+            if not text or text.lower().startswith('persona') or text.startswith('==='):
+                continue
+            # Remove markdown formatting from the text
+            text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)  # Bold
+            text = re.sub(r'\*(.+?)\*', r'\1', text)  # Italic
+            # Skip very short responses (likely parsing errors)
+            if len(text) >= 10:
+                lines.append(text)
+    return lines
 
 
 class LLMClient:
