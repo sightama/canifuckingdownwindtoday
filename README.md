@@ -55,6 +55,11 @@ CACHE_REFRESH_HOURS=2
 python app/main.py
 ```
 
+to run as module
+```bash
+python -m app.main
+```
+
 Visit http://localhost:8080
 
 ## Testing
