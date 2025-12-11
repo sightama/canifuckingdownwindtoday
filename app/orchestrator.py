@@ -107,6 +107,13 @@ class AppOrchestrator:
 
         debug_log(f"Initial load: {len(sup_variations)} variations for {persona_id}", "ORCHESTRATOR")
 
+        # Store initial variations in cache so get_random_variation() can find them
+        initial_variations = {
+            "sup": {persona_id: sup_variations},
+            "parawing": {}
+        }
+        self.cache.set_variations(ratings, initial_variations)
+
         return {
             "is_offline": False,
             "timestamp": sensor_data.get("fetched_at"),
