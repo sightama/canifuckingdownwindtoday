@@ -65,6 +65,145 @@ class AppOrchestrator:
 
         return self._build_online_response()
 
+    def get_initial_data(self, persona_id: str) -> dict:
+        """
+        Fast path for initial page load.
+
+        Returns cached data if fresh, otherwise fetches sensor data and
+        generates variations for ONE persona in BOTH modes.
+        Use refresh_remaining_variations() afterward to populate full cache.
+
+        Args:
+            persona_id: The persona to generate variations for
+
+        Returns:
+            Same structure as get_cached_data() but with minimal variations
+        """
+        # Refresh sensor if needed
+        if self.cache.is_sensor_stale():
+            self._refresh_sensor()
+
+        # Check offline state
+        if self.cache.is_offline():
+            return self._build_offline_response()
+
+        # Get current ratings
+        sensor_data = self.cache.get_sensor()
+        if not sensor_data or not sensor_data.get("reading"):
+            return self._build_offline_response()
+
+        reading = sensor_data["reading"]
+        ratings = sensor_data.get("ratings", {})
+
+        # Check if we already have fresh variations for this persona
+        if self.cache.has_fresh_variations(persona_id):
+            debug_log(f"Using cached variations for {persona_id}", "ORCHESTRATOR")
+            variations_cache = self.cache.get_all_variations()
+            return {
+                "is_offline": False,
+                "timestamp": sensor_data.get("fetched_at"),
+                "last_known_reading": reading,
+                "weather": self._reading_to_weather_dict(reading),
+                "ratings": ratings,
+                "variations": variations_cache.get("variations", {}),
+                "initial_persona_id": persona_id
+            }
+
+        # Generate variations for single persona in BOTH modes
+        sup_variations = self.llm_client.generate_single_persona_variations(
+            wind_speed=reading.wind_speed_kts,
+            wind_direction=reading.wind_direction,
+            wave_height=0,
+            swell_direction="N",
+            rating=ratings.get("sup", 5),
+            mode="sup",
+            persona_id=persona_id
+        )
+
+        parawing_variations = self.llm_client.generate_single_persona_variations(
+            wind_speed=reading.wind_speed_kts,
+            wind_direction=reading.wind_direction,
+            wave_height=0,
+            swell_direction="N",
+            rating=ratings.get("parawing", 5),
+            mode="parawing",
+            persona_id=persona_id
+        )
+
+        debug_log(f"Initial load: {len(sup_variations)} SUP, {len(parawing_variations)} parawing for {persona_id}", "ORCHESTRATOR")
+
+        # Store initial variations in cache (merge to preserve other personas)
+        initial_variations = {
+            "sup": {persona_id: sup_variations},
+            "parawing": {persona_id: parawing_variations}
+        }
+        self.cache.set_variations(ratings, initial_variations, merge=True)
+
+        return {
+            "is_offline": False,
+            "timestamp": sensor_data.get("fetched_at"),
+            "last_known_reading": reading,
+            "weather": self._reading_to_weather_dict(reading),
+            "ratings": ratings,
+            "variations": {
+                "sup": {persona_id: sup_variations},
+                "parawing": {persona_id: parawing_variations}
+            },
+            "initial_persona_id": persona_id
+        }
+
+    def refresh_remaining_variations(
+        self,
+        initial_persona_id: str,
+        initial_mode: str = "sup"
+    ) -> None:
+        """
+        Background task: Populate full variations cache after initial load.
+
+        Generates variations for all personas and both modes (SUP + Parawing).
+        Call this AFTER get_initial_data() and after the page is visible.
+
+        Args:
+            initial_persona_id: Persona fetched during initial load (for logging)
+            initial_mode: Mode fetched during initial load (default "sup")
+        """
+        if self.cache.is_offline():
+            debug_log("Skipping background refresh - offline", "ORCHESTRATOR")
+            return
+
+        # Check if cache already has complete variations
+        if self.cache.has_complete_variations():
+            debug_log("Skipping background refresh - cache is complete", "ORCHESTRATOR")
+            return
+
+        sensor_data = self.cache.get_sensor()
+        if not sensor_data or not sensor_data.get("reading"):
+            debug_log("Skipping background refresh - no sensor data", "ORCHESTRATOR")
+            return
+
+        reading = sensor_data["reading"]
+        ratings = self.cache.get_ratings() or {"sup": 5, "parawing": 5}
+
+        debug_log("Starting background variation refresh", "ORCHESTRATOR")
+
+        # Generate full variations for both modes
+        variations = {"sup": {}, "parawing": {}}
+
+        for mode in ["sup", "parawing"]:
+            mode_variations = self.llm_client.generate_all_variations(
+                wind_speed=reading.wind_speed_kts,
+                wind_direction=reading.wind_direction,
+                wave_height=0,
+                swell_direction="N",
+                rating=ratings[mode],
+                mode=mode
+            )
+            variations[mode] = mode_variations
+
+        # Merge to preserve any good data from initial load (in case batch had parsing failures)
+        self.cache.set_variations(ratings, variations, merge=True)
+        debug_log(f"Background refresh complete: {sum(len(v) for v in variations['sup'].values())} SUP variations", "ORCHESTRATOR")
+
     def _refresh_sensor(self) -> None:
         """Fetch fresh sensor data and calculate ratings."""
         debug_log("Refreshing sensor data", "ORCHESTRATOR")

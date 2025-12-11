@@ -93,7 +93,8 @@ class CacheManager:
     def set_variations(
         self,
         rating_snapshot: dict[str, int],
-        variations: dict[str, dict[str, list[str]]]
+        variations: dict[str, dict[str, list[str]]],
+        merge: bool = False
     ) -> None:
         """
         Store LLM variations with the rating they were generated for.
@@ -101,7 +102,27 @@ class CacheManager:
         Args:
             rating_snapshot: {"sup": int, "parawing": int} at generation time
             variations: {"sup": {"persona_id": [responses]}, "parawing": {...}}
+            merge: If True, merge new variations into existing cache instead of overwriting
         """
+        if merge and self._variations_cache is not None:
+            # Check if rating changed - if so, we need to invalidate old cache
+            old_snapshot = self._variations_cache.get("rating_snapshot", {})
+            if old_snapshot == rating_snapshot:
+                # Same rating - merge new variations into existing
+                existing = self._variations_cache.get("variations", {"sup": {}, "parawing": {}})
+                for mode in ["sup", "parawing"]:
+                    for persona_id, persona_variations in variations.get(mode, {}).items():
+                        # Only update if new variations are non-empty
+                        if persona_variations:
+                            existing.setdefault(mode, {})[persona_id] = persona_variations
+                self._variations_cache = {
+                    "rating_snapshot": rating_snapshot,
+                    "variations": existing,
+                    "generated_at": datetime.now(timezone.utc)
+                }
+                return
+
+        # Overwrite mode (default) or rating changed
         self._variations_cache = {
             "rating_snapshot": rating_snapshot,
             "variations": variations,
@@ -158,6 +179,49 @@ class CacheManager:
         # Check if rating changed
         snapshot = self._variations_cache.get("rating_snapshot", {})
         return snapshot != current_ratings
+
+    def has_fresh_variations(self, persona_id: str) -> bool:
+        """
+        Check if we have fresh (non-stale) variations for a persona in BOTH modes.
+
+        Args:
+            persona_id: The persona to check
+
+        Returns:
+            True if cache has fresh variations for this persona in both sup and parawing
+        """
+        if self._variations_cache is None:
+            return False
+
+        if self.is_variations_stale():
+            return False
+
+        variations = self._variations_cache.get("variations", {})
+        sup_variations = variations.get("sup", {}).get(persona_id, [])
+        parawing_variations = variations.get("parawing", {}).get(persona_id, [])
+
+        return len(sup_variations) > 0 and len(parawing_variations) > 0
+
+    def has_complete_variations(self) -> bool:
+        """
+        Check if variations cache has all personas for both modes.
+
+        Returns:
+            True if cache has variations for all personas in both modes
+        """
+        if self._variations_cache is None:
+            return False
+
+        if self.is_variations_stale():
+            return False
+
+        variations = self._variations_cache.get("variations", {})
+        sup_personas = variations.get("sup", {})
+        parawing_personas = variations.get("parawing", {})
+
+        # Need at least some variations for both modes
+        # A "complete" cache has multiple personas (not just the initial one)
+        return len(sup_personas) >= 4 and len(parawing_personas) >= 4
 
     # ==================== Offline State ====================
 

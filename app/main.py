@@ -1,7 +1,7 @@
 # ABOUTME: Main NiceGUI web application entry point
 # ABOUTME: Provides simple 90s-style UI for downwind condition ratings
 
-from nicegui import ui
+from nicegui import ui, Client
 from app.config import Config
 from app.orchestrator import AppOrchestrator
 from app.ui.crayon_graph import CrayonGraph
@@ -12,7 +12,7 @@ orchestrator = AppOrchestrator(api_key=Config.GEMINI_API_KEY)
 
 
 @ui.page('/')
-async def index():
+async def index(client: Client):
     """Main page with 90s aesthetic"""
 
     # Apply 90s styling with responsive scaling
@@ -271,23 +271,23 @@ async def index():
         # Last updated timestamp
         timestamp_label = ui.html('<div class="timestamp">Last updated: --</div>', sanitize=False)
 
-        # Pre-fetch unified cache data
+        # Pre-fetch data
         cached_data = None
         current_persona_id = None
         cached_recommendations = None
 
-        async def prefetch_all():
-            """Fetch unified cache data on page load"""
+        async def fast_initial_load():
+            """Fast path: fetch sensor + 1 persona only, show page immediately"""
             nonlocal cached_data, current_persona_id, cached_recommendations
             try:
                 from app.ai.personas import get_random_persona
 
+                # Wait for client WebSocket connection before running JavaScript
+                await client.connected()
+
                 # Get last persona from localStorage via JS
                 last_persona = await ui.run_javascript('getLastPersona()')
                 exclude_id = last_persona if last_persona else None
-
-                # Get unified cache (auto-refreshes if stale)
-                cached_data = orchestrator.get_cached_data()
 
                 # Select a random persona (excluding last one)
                 persona = get_random_persona(exclude_id=exclude_id)
@@ -296,13 +296,39 @@ async def index():
                 # Store the new persona ID
                 await ui.run_javascript(f"setLastPersona('{current_persona_id}')")
 
-                # Get foil recommendations from cache
-                if cached_data and cached_data['ratings']['sup'] > 0:
-                    cached_recommendations = orchestrator.get_foil_recommendations(score=cached_data['ratings']['sup'])
+                # FAST PATH: Get initial data with single persona
+                cached_data = orchestrator.get_initial_data(persona_id=current_persona_id)
+
+                # Get foil recommendations
+                ratings = cached_data.get('ratings') if cached_data else None
+                if ratings and ratings.get('sup', 0) > 0:
+                    cached_recommendations = orchestrator.get_foil_recommendations(
+                        score=cached_data['ratings']['sup']
+                    )
                 else:
                     cached_recommendations = orchestrator.get_foil_recommendations()
+
             except Exception as e:
-                print(f"Prefetch error: {e}")
+                print(f"Fast initial load error: {e}")
+                # Fallback to full load on error
+                cached_data = orchestrator.get_cached_data()
+
+        async def background_refresh():
+            """Background: fetch remaining personas and parawing mode"""
+            try:
+                if current_persona_id and cached_data and not cached_data.get("is_offline"):
+                    # Run in executor to not block UI
+                    import asyncio
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(
+                        None,
+                        lambda: orchestrator.refresh_remaining_variations(
+                            initial_persona_id=current_persona_id,
+                            initial_mode="sup"
+                        )
+                    )
+            except Exception as e:
+                print(f"Background refresh error: {e}")
 
         def update_display():
             """Update display based on toggle selection using cached data"""
@@ -384,24 +410,30 @@ async def index():
 
         async def show_content():
             """Fade out loading overlay and fade in main content"""
-            await ui.run_javascript('''
-                document.getElementById('loading-overlay').classList.add('fade-out');
-                document.getElementById('main-content').classList.add('visible');
-                // Remove overlay from DOM after animation
-                setTimeout(() => {
-                    const overlay = document.getElementById('loading-overlay');
-                    if (overlay) overlay.remove();
-                }, 500);
-            ''')
+            try:
+                await ui.run_javascript('''
+                    document.getElementById('loading-overlay').classList.add('fade-out');
+                    document.getElementById('main-content').classList.add('visible');
+                    // Remove overlay from DOM after animation
+                    setTimeout(() => {
+                        const overlay = document.getElementById('loading-overlay');
+                        if (overlay) overlay.remove();
+                    }, 500);
+                ''', timeout=5.0)
+            except TimeoutError:
+                # Client may have disconnected - content is already displayed
+                pass
 
         # Update on toggle change (instant since data is cached)
         toggle.on_value_change(lambda: update_display())
 
-        # Initial load: prefetch all data then update display
+        # Initial load: fast path then background refresh
         async def initial_load():
-            await prefetch_all()
+            await fast_initial_load()
             update_display()
             await show_content()
+            # Start background refresh after page is visible
+            ui.timer(0.5, background_refresh, once=True)
 
         ui.timer(0.1, initial_load, once=True)
 

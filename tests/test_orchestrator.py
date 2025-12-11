@@ -194,3 +194,291 @@ class TestSensorFlow:
 
             assert result["is_offline"] is True
             assert result["last_known_reading"] is not None
+
+
+class TestFastInitialLoad:
+    """Tests for fast initial page load"""
+
+    def test_get_initial_data_returns_minimal_structure(self):
+        """Fast initial load returns data for display with single persona"""
+        with patch('app.orchestrator.SensorClient') as MockSensor, \
+             patch('app.orchestrator.LLMClient') as MockLLM, \
+             patch('app.orchestrator.CacheManager') as MockCache:
+
+            mock_reading = SensorReading(
+                wind_speed_kts=15.0,
+                wind_gust_kts=18.0,
+                wind_lull_kts=12.0,
+                wind_direction="N",
+                wind_degrees=0,
+                air_temp_f=75.0,
+                timestamp_utc=datetime.now(timezone.utc),
+                spot_name="Test"
+            )
+            mock_sensor = MagicMock()
+            mock_sensor.fetch.return_value = mock_reading
+            MockSensor.return_value = mock_sensor
+
+            mock_cache = MagicMock()
+            mock_cache.is_sensor_stale.return_value = True
+            mock_cache.is_offline.return_value = False
+            mock_cache.has_fresh_variations.return_value = False  # No cache
+            mock_cache.get_sensor.return_value = {
+                "reading": mock_reading,
+                "ratings": {"sup": 7, "parawing": 8},
+                "fetched_at": datetime.now(timezone.utc)
+            }
+            MockCache.return_value = mock_cache
+
+            mock_llm = MagicMock()
+            mock_llm.generate_single_persona_variations.return_value = [
+                "Test response 1",
+                "Test response 2"
+            ]
+            MockLLM.return_value = mock_llm
+
+            from app.orchestrator import AppOrchestrator
+            orchestrator = AppOrchestrator(api_key="test")
+            orchestrator.sensor_client = mock_sensor
+            orchestrator.cache = mock_cache
+            orchestrator.llm_client = mock_llm
+
+            result = orchestrator.get_initial_data(persona_id="drill_sergeant")
+
+            assert result["is_offline"] is False
+            assert result["ratings"]["sup"] is not None
+            assert "drill_sergeant" in result["variations"]["sup"]
+            assert len(result["variations"]["sup"]["drill_sergeant"]) == 2
+
+    def test_get_initial_data_generates_two_api_calls_for_both_modes(self):
+        """Fast path makes LLM calls for both SUP and parawing modes"""
+        with patch('app.orchestrator.SensorClient') as MockSensor, \
+             patch('app.orchestrator.LLMClient') as MockLLM, \
+             patch('app.orchestrator.CacheManager') as MockCache:
+
+            mock_reading = SensorReading(
+                wind_speed_kts=15.0,
+                wind_gust_kts=18.0,
+                wind_lull_kts=12.0,
+                wind_direction="N",
+                wind_degrees=0,
+                air_temp_f=75.0,
+                timestamp_utc=datetime.now(timezone.utc),
+                spot_name="Test"
+            )
+            mock_sensor = MagicMock()
+            mock_sensor.fetch.return_value = mock_reading
+            MockSensor.return_value = mock_sensor
+
+            mock_cache = MagicMock()
+            mock_cache.is_sensor_stale.return_value = True
+            mock_cache.is_offline.return_value = False
+            mock_cache.has_fresh_variations.return_value = False  # No cache
+            mock_cache.get_sensor.return_value = {
+                "reading": mock_reading,
+                "ratings": {"sup": 7, "parawing": 8},
+                "fetched_at": datetime.now(timezone.utc)
+            }
+            MockCache.return_value = mock_cache
+
+            mock_llm = MagicMock()
+            mock_llm.generate_single_persona_variations.return_value = ["Test"]
+            mock_llm.generate_all_variations.return_value = {}
+            MockLLM.return_value = mock_llm
+
+            from app.orchestrator import AppOrchestrator
+            orchestrator = AppOrchestrator(api_key="test")
+            orchestrator.sensor_client = mock_sensor
+            orchestrator.cache = mock_cache
+            orchestrator.llm_client = mock_llm
+
+            orchestrator.get_initial_data(persona_id="drill_sergeant")
+
+            # Should call single persona method twice (once for sup, once for parawing)
+            assert mock_llm.generate_single_persona_variations.call_count == 2
+            # Should NOT call batch method
+            assert mock_llm.generate_all_variations.call_count == 0
+
+    def test_refresh_remaining_variations_fills_cache(self):
+        """Background refresh generates all remaining variations"""
+        with patch('app.orchestrator.SensorClient') as MockSensor, \
+             patch('app.orchestrator.LLMClient') as MockLLM, \
+             patch('app.orchestrator.CacheManager') as MockCache:
+
+            mock_reading = SensorReading(
+                wind_speed_kts=15.0,
+                wind_gust_kts=18.0,
+                wind_lull_kts=12.0,
+                wind_direction="N",
+                wind_degrees=0,
+                air_temp_f=75.0,
+                timestamp_utc=datetime.now(timezone.utc),
+                spot_name="Test"
+            )
+
+            mock_cache = MagicMock()
+            mock_cache.is_offline.return_value = False
+            mock_cache.has_complete_variations.return_value = False  # Cache not complete
+            mock_cache.get_sensor.return_value = {
+                "reading": mock_reading,
+                "ratings": {"sup": 7, "parawing": 8},
+                "fetched_at": datetime.now(timezone.utc)
+            }
+            mock_cache.get_ratings.return_value = {"sup": 7, "parawing": 8}
+            MockCache.return_value = mock_cache
+
+            mock_llm = MagicMock()
+            mock_llm.generate_all_variations.return_value = {
+                "drill_sergeant": ["response1"],
+                "disappointed_dad": ["response2"]
+            }
+            MockLLM.return_value = mock_llm
+
+            from app.orchestrator import AppOrchestrator
+            orchestrator = AppOrchestrator(api_key="test")
+            orchestrator.cache = mock_cache
+            orchestrator.llm_client = mock_llm
+
+            orchestrator.refresh_remaining_variations(
+                initial_persona_id="drill_sergeant",
+                initial_mode="sup"
+            )
+
+            # Should call generate_all_variations for both modes
+            assert mock_llm.generate_all_variations.call_count == 2
+
+            # Should update cache
+            mock_cache.set_variations.assert_called()
+
+    def test_get_initial_data_uses_cache_when_fresh(self):
+        """Fast path returns cached data without LLM call if cache is fresh"""
+        with patch('app.orchestrator.SensorClient') as MockSensor, \
+             patch('app.orchestrator.LLMClient') as MockLLM, \
+             patch('app.orchestrator.CacheManager') as MockCache:
+
+            mock_reading = SensorReading(
+                wind_speed_kts=15.0,
+                wind_gust_kts=18.0,
+                wind_lull_kts=12.0,
+                wind_direction="N",
+                wind_degrees=0,
+                air_temp_f=75.0,
+                timestamp_utc=datetime.now(timezone.utc),
+                spot_name="Test"
+            )
+
+            mock_cache = MagicMock()
+            mock_cache.is_sensor_stale.return_value = False  # Sensor is fresh
+            mock_cache.is_offline.return_value = False
+            mock_cache.get_sensor.return_value = {
+                "reading": mock_reading,
+                "ratings": {"sup": 7, "parawing": 8},
+                "fetched_at": datetime.now(timezone.utc)
+            }
+            # Cache has fresh variations for this persona
+            mock_cache.has_fresh_variations.return_value = True
+            mock_cache.get_variations.return_value = ["Cached response 1", "Cached response 2"]
+            mock_cache.get_all_variations.return_value = {
+                "rating_snapshot": {"sup": 7, "parawing": 8},
+                "variations": {
+                    "sup": {"drill_sergeant": ["Cached response 1", "Cached response 2"]},
+                    "parawing": {"drill_sergeant": ["Cached parawing 1"]}
+                }
+            }
+            MockCache.return_value = mock_cache
+
+            mock_llm = MagicMock()
+            MockLLM.return_value = mock_llm
+
+            from app.orchestrator import AppOrchestrator
+            orchestrator = AppOrchestrator(api_key="test")
+            orchestrator.cache = mock_cache
+            orchestrator.llm_client = mock_llm
+
+            result = orchestrator.get_initial_data(persona_id="drill_sergeant")
+
+            # Should NOT call any LLM methods - data is cached
+            assert mock_llm.generate_single_persona_variations.call_count == 0
+            assert mock_llm.generate_all_variations.call_count == 0
+
+            # Should return cached data
+            assert result["is_offline"] is False
+            assert "drill_sergeant" in result["variations"]["sup"]
+
+    def test_get_initial_data_fetches_both_modes(self):
+        """Initial load fetches variations for BOTH sup and parawing"""
+        with patch('app.orchestrator.SensorClient') as MockSensor, \
+             patch('app.orchestrator.LLMClient') as MockLLM, \
+             patch('app.orchestrator.CacheManager') as MockCache:
+
+            mock_reading = SensorReading(
+                wind_speed_kts=15.0,
+                wind_gust_kts=18.0,
+                wind_lull_kts=12.0,
+                wind_direction="N",
+                wind_degrees=0,
+                air_temp_f=75.0,
+                timestamp_utc=datetime.now(timezone.utc),
+                spot_name="Test"
+            )
+            mock_sensor = MagicMock()
+            mock_sensor.fetch.return_value = mock_reading
+            MockSensor.return_value = mock_sensor
+
+            mock_cache = MagicMock()
+            mock_cache.is_sensor_stale.return_value = True
+            mock_cache.is_offline.return_value = False
+            mock_cache.has_fresh_variations.return_value = False  # No cache
+            mock_cache.get_sensor.return_value = {
+                "reading": mock_reading,
+                "ratings": {"sup": 7, "parawing": 8},
+                "fetched_at": datetime.now(timezone.utc)
+            }
+            MockCache.return_value = mock_cache
+
+            mock_llm = MagicMock()
+            mock_llm.generate_single_persona_variations.return_value = ["Test response"]
+            MockLLM.return_value = mock_llm
+
+            from app.orchestrator import AppOrchestrator
+            orchestrator = AppOrchestrator(api_key="test")
+            orchestrator.sensor_client = mock_sensor
+            orchestrator.cache = mock_cache
+            orchestrator.llm_client = mock_llm
+
+            result = orchestrator.get_initial_data(persona_id="drill_sergeant")
+
+            # Should call LLM for BOTH modes
+            assert mock_llm.generate_single_persona_variations.call_count == 2
+
+            # Result should have variations for both modes
+            assert "drill_sergeant" in result["variations"]["sup"]
+            assert "drill_sergeant" in result["variations"]["parawing"]
+
+    def test_refresh_remaining_skips_when_cache_fresh(self):
+        """Background refresh does nothing if variations cache is fresh and complete"""
+        with patch('app.orchestrator.SensorClient'), \
+             patch('app.orchestrator.LLMClient') as MockLLM, \
+             patch('app.orchestrator.CacheManager') as MockCache:
+
+            mock_cache = MagicMock()
+            mock_cache.is_offline.return_value = False
+            mock_cache.is_variations_stale.return_value = False  # Cache is fresh
+            mock_cache.has_complete_variations.return_value = True  # All variations present
+            MockCache.return_value = mock_cache
+
+            mock_llm = MagicMock()
+            MockLLM.return_value = mock_llm
+
+            from app.orchestrator import AppOrchestrator
+            orchestrator = AppOrchestrator(api_key="test")
+            orchestrator.cache = mock_cache
+            orchestrator.llm_client = mock_llm
+
+            orchestrator.refresh_remaining_variations(
+                initial_persona_id="drill_sergeant",
+                initial_mode="sup"
+            )
+
+            # Should NOT call any LLM methods
+            assert mock_llm.generate_all_variations.call_count == 0
