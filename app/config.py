@@ -37,7 +37,9 @@ class Config:
     # Token expires ~January 2027 (13-month lease from iKitesurf login)
     # To refresh: Login to https://wx.ikitesurf.com/spot/453,
     # DevTools > Storage > Cookies > wfToken, update in GCP Secret Manager
+    
     WF_TOKEN = os.getenv("WF_TOKEN", "")
+    
     WF_SPOT_ID = os.getenv("WF_SPOT_ID", "453")  # Jupiter-Juno Beach Pier
 
     # Sensor staleness: if reading is older than this, consider offline

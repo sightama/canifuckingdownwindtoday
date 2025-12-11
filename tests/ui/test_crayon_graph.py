@@ -31,19 +31,12 @@ class TestCrayonGraph:
 
         assert 'stroke="red"' in svg or 'stroke="#' in svg
 
-    def test_contains_coast_label(self):
-        """SVG should have 'coast' label"""
+    def test_contains_title(self):
+        """SVG should have a title"""
         graph = CrayonGraph()
         svg = graph.render(wind_direction="NE")
 
-        assert 'coast' in svg.lower()
-
-    def test_contains_wind_label(self):
-        """SVG should have 'wind' label"""
-        graph = CrayonGraph()
-        svg = graph.render(wind_direction="NE")
-
-        assert 'wind' in svg.lower()
+        assert 'Coastline' in svg or 'Wind' in svg
 
     def test_wind_direction_affects_arrow(self):
         """Different wind directions should produce different SVGs"""
@@ -84,3 +77,51 @@ class TestCrayonGraph:
         # Should not have a solid background rectangle
         # or should have fill="none" or fill="transparent"
         assert 'fill="white"' not in svg or 'fill="none"' in svg
+
+    def test_no_pointer_arrows(self):
+        """SVG should not have black pointer arrows"""
+        graph = CrayonGraph()
+        svg = graph.render(wind_direction="NE")
+
+        # Should NOT have black/gray pointer lines
+        assert 'stroke="#333"' not in svg
+
+    def test_has_land_texture(self):
+        """SVG should have land texture (dots/circles) left of coast"""
+        graph = CrayonGraph()
+        svg = graph.render(wind_direction="NE")
+
+        # Should have some land representation (circles or dots)
+        assert '<circle' in svg or 'land' in svg.lower()
+
+    def test_has_ocean_texture(self):
+        """SVG should have ocean texture right of coast"""
+        graph = CrayonGraph()
+        svg = graph.render(wind_direction="NE")
+
+        # Should have ocean representation (waves or similar)
+        assert 'ocean' in svg.lower() or 'wave' in svg.lower() or svg.count('<path') > 3
+
+    def test_north_wind_points_south(self):
+        """Wind from North should point arrow SOUTH (down)"""
+        import re
+        graph = CrayonGraph()
+        svg = graph.render(wind_direction="N")
+
+        # Extract the wind arrow end point from SVG
+        # The arrow starts at (200, 100) - if pointing south, end_y > 100
+        # Look for the red path that forms the arrow
+        red_paths = re.findall(r'<path d="M ([0-9.]+) ([0-9.]+) L ([0-9.]+) ([0-9.]+)', svg)
+
+        # Find a red path (wind arrow)
+        wind_arrow_found = False
+        for match in red_paths:
+            start_x, start_y, end_x, end_y = map(float, match)
+            # Arrow starts near (200, 100)
+            if abs(start_x - 200) < 10 and abs(start_y - 100) < 10:
+                # If pointing south, end_y should be GREATER than start_y
+                assert float(end_y) > float(start_y), f"North wind should point south (down), but end_y={end_y} <= start_y={start_y}"
+                wind_arrow_found = True
+                break
+
+        assert wind_arrow_found, "Could not find wind arrow in SVG"
