@@ -296,3 +296,53 @@ class TestFastInitialLoad:
             assert mock_llm.generate_single_persona_variations.call_count == 1
             # Should NOT call batch method
             assert mock_llm.generate_all_variations.call_count == 0
+
+    def test_refresh_remaining_variations_fills_cache(self):
+        """Background refresh generates all remaining variations"""
+        with patch('app.orchestrator.SensorClient') as MockSensor, \
+             patch('app.orchestrator.LLMClient') as MockLLM, \
+             patch('app.orchestrator.CacheManager') as MockCache:
+
+            mock_reading = SensorReading(
+                wind_speed_kts=15.0,
+                wind_gust_kts=18.0,
+                wind_lull_kts=12.0,
+                wind_direction="N",
+                wind_degrees=0,
+                air_temp_f=75.0,
+                timestamp_utc=datetime.now(timezone.utc),
+                spot_name="Test"
+            )
+
+            mock_cache = MagicMock()
+            mock_cache.is_offline.return_value = False
+            mock_cache.get_sensor.return_value = {
+                "reading": mock_reading,
+                "ratings": {"sup": 7, "parawing": 8},
+                "fetched_at": datetime.now(timezone.utc)
+            }
+            mock_cache.get_ratings.return_value = {"sup": 7, "parawing": 8}
+            MockCache.return_value = mock_cache
+
+            mock_llm = MagicMock()
+            mock_llm.generate_all_variations.return_value = {
+                "drill_sergeant": ["response1"],
+                "disappointed_dad": ["response2"]
+            }
+            MockLLM.return_value = mock_llm
+
+            from app.orchestrator import AppOrchestrator
+            orchestrator = AppOrchestrator(api_key="test")
+            orchestrator.cache = mock_cache
+            orchestrator.llm_client = mock_llm
+
+            orchestrator.refresh_remaining_variations(
+                initial_persona_id="drill_sergeant",
+                initial_mode="sup"
+            )
+
+            # Should call generate_all_variations for both modes
+            assert mock_llm.generate_all_variations.call_count == 2
+
+            # Should update cache
+            mock_cache.set_variations.assert_called()
