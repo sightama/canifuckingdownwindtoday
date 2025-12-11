@@ -32,14 +32,19 @@ def parse_variations_response(response_text: str) -> dict[str, list[str]]:
             persona_id = parts[i].strip()
             content = parts[i + 1].strip()
 
-            # Extract numbered responses
+            # Extract numbered responses - handle various LLM formatting quirks
             lines = []
             for line in content.split('\n'):
                 line = line.strip()
-                # Match lines starting with number and period: "1. Response text"
-                match = re.match(r'^\d+\.\s*(.+)$', line)
+                # Match various formats: "1. text", "**1.** text", "1) text", "1: text"
+                match = re.match(r'^[\*]*(\d+)[\.\)\:][\*]*\s*(.+)$', line)
                 if match:
-                    lines.append(match.group(1).strip())
+                    text = match.group(2).strip()
+                    # Remove markdown formatting from the text
+                    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)  # Bold
+                    text = re.sub(r'\*(.+?)\*', r'\1', text)  # Italic
+                    if text:
+                        lines.append(text)
 
             if lines:
                 result[persona_id] = lines
@@ -232,13 +237,19 @@ Format as numbered list:
             response = self.model.generate_content(prompt)
             debug_log(f"Single persona response length: {len(response.text)} chars", "LLM")
 
-            # Parse numbered list
+            # Parse numbered list - handle various LLM formatting quirks
             lines = []
             for line in response.text.strip().split('\n'):
                 line = line.strip()
-                match = re.match(r'^\d+\.\s*(.+)$', line)
+                # Match various formats: "1. text", "**1.** text", "1) text", "1: text"
+                match = re.match(r'^[\*]*(\d+)[\.\)\:][\*]*\s*(.+)$', line)
                 if match:
-                    lines.append(match.group(1).strip())
+                    text = match.group(2).strip()
+                    # Remove markdown formatting from the text
+                    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)  # Bold
+                    text = re.sub(r'\*(.+?)\*', r'\1', text)  # Italic
+                    if text:
+                        lines.append(text)
 
             return lines
         except Exception as e:

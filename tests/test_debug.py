@@ -7,12 +7,19 @@ from unittest.mock import patch
 
 def test_debug_mode_disabled_by_default():
     """Debug mode should be disabled when env var not set"""
-    with patch.dict(os.environ, {}, clear=True):
-        # Force reimport to pick up env change
-        from importlib import reload
-        from app import config
-        reload(config)
-        assert config.Config.DEBUG is False
+    # Need to mock dotenv.load_dotenv before reload to prevent .env override
+    import dotenv
+    original_load_dotenv = dotenv.load_dotenv
+    dotenv.load_dotenv = lambda *args, **kwargs: None
+    try:
+        with patch.dict(os.environ, {}, clear=True):
+            # Force reimport to pick up env change
+            from importlib import reload
+            from app import config
+            reload(config)
+            assert config.Config.DEBUG is False
+    finally:
+        dotenv.load_dotenv = original_load_dotenv
 
 
 def test_debug_mode_enabled_when_env_true():

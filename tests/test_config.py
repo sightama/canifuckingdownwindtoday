@@ -23,20 +23,27 @@ def test_config_has_cache_refresh_hours():
 
 def test_config_has_correct_wind_directions_for_jupiter():
     """
-    Jupiter FL coast runs N-S, so optimal wind follows the coast.
-    Best: N, S (parallel to coast - pushes along the run)
-    Good: NE, SE, NW, SW (diagonal - has component along coast)
-    Bad: E, W (perpendicular - pushes into shore or out to sea)
+    Jupiter FL coast runs SSE to NNW, so optimal wind follows the coast.
+    Best: NNW, SSE (true along-coast - pushes along the run)
+    Good: N, S, NE, NNE, SE (mostly along-coast with diagonal component)
+    OK: NW, SW, SSW (somewhat cross-shore)
+    Bad: E, W, ENE, ESE, WNW, WSW (cross-shore)
     """
-    # Best directions should be N and S
-    assert "N" in Config.OPTIMAL_WIND_DIRECTIONS
-    assert "S" in Config.OPTIMAL_WIND_DIRECTIONS
+    # Best directions should be NNW and SSE (true along-coast)
+    assert "NNW" in Config.OPTIMAL_WIND_DIRECTIONS
+    assert "SSE" in Config.OPTIMAL_WIND_DIRECTIONS
 
-    # Good directions should include diagonals
+    # Good directions should include N, S and east-leaning diagonals
+    assert "N" in Config.GOOD_WIND_DIRECTIONS
+    assert "S" in Config.GOOD_WIND_DIRECTIONS
     assert "NE" in Config.GOOD_WIND_DIRECTIONS
+    assert "NNE" in Config.GOOD_WIND_DIRECTIONS
     assert "SE" in Config.GOOD_WIND_DIRECTIONS
-    assert "NW" in Config.GOOD_WIND_DIRECTIONS
-    assert "SW" in Config.GOOD_WIND_DIRECTIONS
+
+    # OK directions (somewhat cross-shore)
+    assert "NW" in Config.OK_WIND_DIRECTIONS
+    assert "SW" in Config.OK_WIND_DIRECTIONS
+    assert "SSW" in Config.OK_WIND_DIRECTIONS
 
     # Bad directions should NOT be in optimal or good
     assert "E" not in Config.OPTIMAL_WIND_DIRECTIONS
