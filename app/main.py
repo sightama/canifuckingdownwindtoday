@@ -432,8 +432,12 @@ async def index(client: Client):
             await fast_initial_load()
             update_display()
             await show_content()
-            # Start background refresh after page is visible
-            ui.timer(0.5, background_refresh, once=True)
+            # Start background refresh after page is visible (if client still connected)
+            try:
+                ui.timer(0.5, background_refresh, once=True)
+            except Exception:
+                # Client disconnected before we could start background refresh - that's fine
+                pass
 
         ui.timer(0.1, initial_load, once=True)
 
