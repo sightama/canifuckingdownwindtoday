@@ -1,7 +1,8 @@
 # ABOUTME: Main NiceGUI web application entry point
 # ABOUTME: Provides simple 90s-style UI for downwind condition ratings
 
-from nicegui import ui, Client
+import asyncio
+from nicegui import ui, Client, app
 from app.config import Config
 from app.orchestrator import AppOrchestrator
 from app.ui.crayon_graph import CrayonGraph
@@ -9,6 +10,28 @@ from app.ui.crayon_graph import CrayonGraph
 
 # Initialize orchestrator
 orchestrator = AppOrchestrator(api_key=Config.GEMINI_API_KEY)
+
+
+# Periodic refresh task - runs in background
+async def periodic_refresh_loop():
+    """Background loop that checks cache refresh every 5 minutes."""
+    while True:
+        await asyncio.sleep(300)  # 5 minutes
+        try:
+            orchestrator.check_and_refresh_if_needed()
+        except Exception as e:
+            print(f"Periodic refresh error: {e}")
+
+
+# Startup hook - warm cache and start periodic refresh
+@app.on_startup
+async def startup_warmup():
+    """Warm up cache on server startup and start periodic refresh."""
+    loop = asyncio.get_event_loop()
+    # Run warmup in executor to avoid blocking startup
+    loop.run_in_executor(None, orchestrator.warmup_cache)
+    # Start periodic refresh task
+    asyncio.create_task(periodic_refresh_loop())
 
 
 @ui.page('/')
@@ -276,16 +299,9 @@ async def index(client: Client):
         cached_data = None
         current_persona_id = None
         cached_recommendations = None
-        client_connected = True
 
-        def on_client_disconnect():
-            nonlocal client_connected
-            client_connected = False
-
-        client.on_disconnect(on_client_disconnect)
-
-        async def fast_initial_load():
-            """Fast path: fetch sensor + 1 persona only, show page immediately"""
+        async def load_initial_data():
+            """Load data from cache (already warmed up on startup)"""
             nonlocal cached_data, current_persona_id, cached_recommendations
             try:
                 from app.ai.personas import get_random_persona
@@ -304,8 +320,8 @@ async def index(client: Client):
                 # Store the new persona ID
                 await ui.run_javascript(f"setLastPersona('{current_persona_id}')")
 
-                # FAST PATH: Get initial data with single persona
-                cached_data = orchestrator.get_initial_data(persona_id=current_persona_id)
+                # Read from cache (should already be warmed up)
+                cached_data = orchestrator.get_cached_data()
 
                 # Get foil recommendations
                 ratings = cached_data.get('ratings') if cached_data else None
@@ -317,26 +333,8 @@ async def index(client: Client):
                     cached_recommendations = orchestrator.get_foil_recommendations()
 
             except Exception as e:
-                print(f"Fast initial load error: {e}")
-                # Fallback to full load on error
+                print(f"Initial load error: {e}")
                 cached_data = orchestrator.get_cached_data()
-
-        async def background_refresh():
-            """Background: fetch remaining personas and parawing mode"""
-            try:
-                if current_persona_id and cached_data and not cached_data.get("is_offline"):
-                    # Run in executor to not block UI
-                    import asyncio
-                    loop = asyncio.get_event_loop()
-                    await loop.run_in_executor(
-                        None,
-                        lambda: orchestrator.refresh_remaining_variations(
-                            initial_persona_id=current_persona_id,
-                            initial_mode="sup"
-                        )
-                    )
-            except Exception as e:
-                print(f"Background refresh error: {e}")
 
         def update_display():
             """Update display based on toggle selection using cached data"""
@@ -435,14 +433,11 @@ async def index(client: Client):
         # Update on toggle change (instant since data is cached)
         toggle.on_value_change(lambda: update_display())
 
-        # Initial load: fast path then background refresh
+        # Initial load: just read from cache and display
         async def initial_load():
-            await fast_initial_load()
+            await load_initial_data()
             update_display()
             await show_content()
-            # Start background refresh after page is visible (if client still connected)
-            if client_connected:
-                ui.timer(0.5, background_refresh, once=True)
 
         ui.timer(0.1, initial_load, once=True)
 

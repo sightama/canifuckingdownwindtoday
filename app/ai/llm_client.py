@@ -3,12 +3,45 @@
 
 import google.generativeai as genai
 import re
+import os
+from datetime import datetime
 from typing import Optional
 from app.debug import debug_log
 from app.ai.personas import PERSONAS
 
 
-def parse_variations_response(response_text: str) -> dict[str, list[str]]:
+def _log_failed_batch_response(response_text: str, mode: str, rating: int) -> None:
+    """
+    Log failed batch parsing responses to file for debugging.
+
+    Args:
+        response_text: The full LLM response that failed to parse
+        mode: "sup" or "parawing"
+        rating: The rating that was used
+    """
+    try:
+        # Create logs directory if it doesn't exist
+        log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "logs")
+        os.makedirs(log_dir, exist_ok=True)
+
+        log_file = os.path.join(log_dir, "llm-failures.log")
+
+        timestamp = datetime.now().isoformat()
+        separator = "=" * 80
+
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(f"\n{separator}\n")
+            f.write(f"Timestamp: {timestamp}\n")
+            f.write(f"Mode: {mode}\n")
+            f.write(f"Rating: {rating}\n")
+            f.write(f"{separator}\n")
+            f.write(response_text)
+            f.write(f"\n{separator}\n\n")
+    except Exception as e:
+        debug_log(f"Failed to log batch failure: {e}", "LLM")
+
+
+def parse_variations_response(response_text: str, mode: str = "unknown", rating: int = 0) -> dict[str, list[str]]:
     """
     Parse the mega-prompt response into a dict of persona variations.
 
@@ -17,6 +50,11 @@ def parse_variations_response(response_text: str) -> dict[str, list[str]]:
     1. First response
     2. Second response
     ...
+
+    Args:
+        response_text: The LLM response to parse
+        mode: The mode ("sup" or "parawing") for logging
+        rating: The rating for logging
 
     Returns:
         {"persona_id": ["response1", "response2", ...], ...}
@@ -60,6 +98,8 @@ def parse_variations_response(response_text: str) -> dict[str, list[str]]:
 
     if not result:
         debug_log(f"Batch parsing failed. Response preview: {response_text[:500]}", "LLM")
+        # Log the full failed response to file
+        _log_failed_batch_response(response_text, mode, rating)
 
     return result
 
@@ -207,7 +247,7 @@ PERSONA STYLES:
         try:
             response = self.model.generate_content(prompt)
             debug_log(f"Batch response length: {len(response.text)} chars", "LLM")
-            return parse_variations_response(response.text)
+            return parse_variations_response(response.text, mode=mode, rating=rating)
         except Exception as e:
             debug_log(f"Batch API error: {e}", "LLM")
             print(f"LLM batch API error: {e}")
@@ -335,7 +375,7 @@ PERSONA STYLES:
         try:
             response = self.model.generate_content(prompt)
             debug_log(f"Offline response length: {len(response.text)} chars", "LLM")
-            return parse_variations_response(response.text)
+            return parse_variations_response(response.text, mode="offline", rating=0)
         except Exception as e:
             debug_log(f"Offline API error: {e}", "LLM")
             print(f"LLM offline API error: {e}")

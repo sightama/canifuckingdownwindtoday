@@ -370,3 +370,125 @@ class AppOrchestrator:
             "code": self.foil_recommender.recommend_code(score=score),
             "kt": self.foil_recommender.recommend_kt(score=score)
         }
+
+    def warmup_cache(self) -> None:
+        """
+        Warm up cache on server startup.
+
+        Fetches sensor data, calculates ratings, and generates all persona variations
+        via batch API calls. Runs in background to avoid blocking startup.
+        """
+        debug_log("Starting cache warmup", "ORCHESTRATOR")
+
+        # Fetch fresh sensor data
+        self._refresh_sensor()
+
+        # Check if we went offline during sensor fetch
+        if self.cache.is_offline():
+            debug_log("Sensor offline during warmup - generating offline variations", "ORCHESTRATOR")
+            self._ensure_offline_variations()
+            return
+
+        # Get current ratings
+        sensor_data = self.cache.get_sensor()
+        if not sensor_data or not sensor_data.get("reading"):
+            debug_log("No sensor data available for warmup", "ORCHESTRATOR")
+            return
+
+        reading = sensor_data["reading"]
+        ratings = sensor_data.get("ratings", {})
+
+        debug_log(f"Warming cache with ratings: {ratings}", "ORCHESTRATOR")
+
+        # Generate all variations for both modes via batch calls
+        variations = {"sup": {}, "parawing": {}}
+
+        for mode in ["sup", "parawing"]:
+            mode_variations = self.llm_client.generate_all_variations(
+                wind_speed=reading.wind_speed_kts,
+                wind_direction=reading.wind_direction,
+                wave_height=0,
+                swell_direction="N",
+                rating=ratings[mode],
+                mode=mode
+            )
+
+            if mode_variations:
+                variations[mode] = mode_variations
+                debug_log(f"Batch warmup: {len(mode_variations)} personas for {mode}", "ORCHESTRATOR")
+            else:
+                # Batch failed - fall back to individual calls
+                debug_log(f"Batch warmup failed for {mode}, falling back to individual calls", "ORCHESTRATOR")
+                from app.ai.personas import PERSONAS
+                for persona in PERSONAS:
+                    persona_id = persona["id"]
+                    persona_variations = self.llm_client.generate_single_persona_variations(
+                        wind_speed=reading.wind_speed_kts,
+                        wind_direction=reading.wind_direction,
+                        wave_height=0,
+                        swell_direction="N",
+                        rating=ratings[mode],
+                        mode=mode,
+                        persona_id=persona_id
+                    )
+                    if persona_variations:
+                        variations[mode][persona_id] = persona_variations
+
+        self.cache.set_variations(ratings, variations)
+        debug_log(f"Cache warmup complete: {sum(len(v) for v in variations['sup'].values())} SUP variations", "ORCHESTRATOR")
+
+    def check_and_refresh_if_needed(self) -> None:
+        """
+        Check if ratings changed significantly and refresh variations if needed.
+
+        Called periodically (every 5 minutes) to keep cache fresh.
+        Regenerates all variations if rating changed by more than 2 points.
+        """
+        debug_log("Checking if cache refresh needed", "ORCHESTRATOR")
+
+        # Fetch fresh sensor data
+        old_ratings = self.cache.get_ratings()
+        self._refresh_sensor()
+
+        # Check if we went offline
+        if self.cache.is_offline():
+            debug_log("Sensor offline during refresh check", "ORCHESTRATOR")
+            self._ensure_offline_variations()
+            return
+
+        # Get new ratings
+        new_ratings = self.cache.get_ratings()
+        if not new_ratings:
+            debug_log("No ratings available for refresh check", "ORCHESTRATOR")
+            return
+
+        # Compare ratings to cached snapshot
+        variations_cache = self.cache.get_all_variations()
+        if not variations_cache:
+            debug_log("No variations cache - triggering warmup", "ORCHESTRATOR")
+            self.warmup_cache()
+            return
+
+        old_snapshot = variations_cache.get("rating_snapshot", {})
+
+        # Check if rating changed significantly
+        if self._ratings_changed_significantly(new_ratings, old_snapshot):
+            debug_log(f"Rating changed significantly: {old_snapshot} -> {new_ratings}, regenerating variations", "ORCHESTRATOR")
+            self._refresh_variations(new_ratings)
+        else:
+            debug_log(f"Rating unchanged or minor change: {old_snapshot} -> {new_ratings}", "ORCHESTRATOR")
+
+    def _ratings_changed_significantly(self, new_ratings: dict, old_ratings: dict) -> bool:
+        """
+        Check if either SUP or parawing rating changed by more than 2 points.
+
+        Args:
+            new_ratings: Current ratings {"sup": int, "parawing": int}
+            old_ratings: Previous ratings {"sup": int, "parawing": int}
+
+        Returns:
+            True if delta > 2 for either mode
+        """
+        sup_delta = abs(new_ratings.get("sup", 0) - old_ratings.get("sup", 0))
+        parawing_delta = abs(new_ratings.get("parawing", 0) - old_ratings.get("parawing", 0))
+        return sup_delta > 2 or parawing_delta > 2
