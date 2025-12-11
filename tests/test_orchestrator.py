@@ -194,3 +194,105 @@ class TestSensorFlow:
 
             assert result["is_offline"] is True
             assert result["last_known_reading"] is not None
+
+
+class TestFastInitialLoad:
+    """Tests for fast initial page load"""
+
+    def test_get_initial_data_returns_minimal_structure(self):
+        """Fast initial load returns data for display with single persona"""
+        with patch('app.orchestrator.SensorClient') as MockSensor, \
+             patch('app.orchestrator.LLMClient') as MockLLM, \
+             patch('app.orchestrator.CacheManager') as MockCache:
+
+            mock_reading = SensorReading(
+                wind_speed_kts=15.0,
+                wind_gust_kts=18.0,
+                wind_lull_kts=12.0,
+                wind_direction="N",
+                wind_degrees=0,
+                air_temp_f=75.0,
+                timestamp_utc=datetime.now(timezone.utc),
+                spot_name="Test"
+            )
+            mock_sensor = MagicMock()
+            mock_sensor.fetch.return_value = mock_reading
+            MockSensor.return_value = mock_sensor
+
+            mock_cache = MagicMock()
+            mock_cache.is_sensor_stale.return_value = True
+            mock_cache.is_offline.return_value = False
+            mock_cache.get_sensor.return_value = {
+                "reading": mock_reading,
+                "ratings": {"sup": 7, "parawing": 8},
+                "fetched_at": datetime.now(timezone.utc)
+            }
+            MockCache.return_value = mock_cache
+
+            mock_llm = MagicMock()
+            mock_llm.generate_single_persona_variations.return_value = [
+                "Test response 1",
+                "Test response 2"
+            ]
+            MockLLM.return_value = mock_llm
+
+            from app.orchestrator import AppOrchestrator
+            orchestrator = AppOrchestrator(api_key="test")
+            orchestrator.sensor_client = mock_sensor
+            orchestrator.cache = mock_cache
+            orchestrator.llm_client = mock_llm
+
+            result = orchestrator.get_initial_data(persona_id="drill_sergeant")
+
+            assert result["is_offline"] is False
+            assert result["ratings"]["sup"] is not None
+            assert "drill_sergeant" in result["variations"]["sup"]
+            assert len(result["variations"]["sup"]["drill_sergeant"]) == 2
+
+    def test_get_initial_data_only_generates_one_api_call(self):
+        """Fast path makes exactly one LLM API call"""
+        with patch('app.orchestrator.SensorClient') as MockSensor, \
+             patch('app.orchestrator.LLMClient') as MockLLM, \
+             patch('app.orchestrator.CacheManager') as MockCache:
+
+            mock_reading = SensorReading(
+                wind_speed_kts=15.0,
+                wind_gust_kts=18.0,
+                wind_lull_kts=12.0,
+                wind_direction="N",
+                wind_degrees=0,
+                air_temp_f=75.0,
+                timestamp_utc=datetime.now(timezone.utc),
+                spot_name="Test"
+            )
+            mock_sensor = MagicMock()
+            mock_sensor.fetch.return_value = mock_reading
+            MockSensor.return_value = mock_sensor
+
+            mock_cache = MagicMock()
+            mock_cache.is_sensor_stale.return_value = True
+            mock_cache.is_offline.return_value = False
+            mock_cache.get_sensor.return_value = {
+                "reading": mock_reading,
+                "ratings": {"sup": 7, "parawing": 8},
+                "fetched_at": datetime.now(timezone.utc)
+            }
+            MockCache.return_value = mock_cache
+
+            mock_llm = MagicMock()
+            mock_llm.generate_single_persona_variations.return_value = ["Test"]
+            mock_llm.generate_all_variations.return_value = {}
+            MockLLM.return_value = mock_llm
+
+            from app.orchestrator import AppOrchestrator
+            orchestrator = AppOrchestrator(api_key="test")
+            orchestrator.sensor_client = mock_sensor
+            orchestrator.cache = mock_cache
+            orchestrator.llm_client = mock_llm
+
+            orchestrator.get_initial_data(persona_id="drill_sergeant")
+
+            # Should call single persona method exactly once
+            assert mock_llm.generate_single_persona_variations.call_count == 1
+            # Should NOT call batch method
+            assert mock_llm.generate_all_variations.call_count == 0

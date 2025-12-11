@@ -65,6 +65,61 @@ class AppOrchestrator:
 
         return self._build_online_response()
 
+    def get_initial_data(self, persona_id: str) -> dict:
+        """
+        Fast path for initial page load.
+
+        Fetches sensor data and generates variations for ONE persona in ONE mode.
+        Use refresh_remaining_variations() afterward to populate full cache.
+
+        Args:
+            persona_id: The persona to generate variations for
+
+        Returns:
+            Same structure as get_cached_data() but with minimal variations
+        """
+        # Refresh sensor if needed
+        if self.cache.is_sensor_stale():
+            self._refresh_sensor()
+
+        # Check offline state
+        if self.cache.is_offline():
+            return self._build_offline_response()
+
+        # Get current ratings
+        sensor_data = self.cache.get_sensor()
+        if not sensor_data or not sensor_data.get("reading"):
+            return self._build_offline_response()
+
+        reading = sensor_data["reading"]
+        ratings = sensor_data.get("ratings", {})
+
+        # Generate variations for single persona, SUP mode only
+        sup_variations = self.llm_client.generate_single_persona_variations(
+            wind_speed=reading.wind_speed_kts,
+            wind_direction=reading.wind_direction,
+            wave_height=0,
+            swell_direction="N",
+            rating=ratings.get("sup", 5),
+            mode="sup",
+            persona_id=persona_id
+        )
+
+        debug_log(f"Initial load: {len(sup_variations)} variations for {persona_id}", "ORCHESTRATOR")
+
+        return {
+            "is_offline": False,
+            "timestamp": sensor_data.get("fetched_at"),
+            "last_known_reading": reading,
+            "weather": self._reading_to_weather_dict(reading),
+            "ratings": ratings,
+            "variations": {
+                "sup": {persona_id: sup_variations},
+                "parawing": {}
+            },
+            "initial_persona_id": persona_id
+        }
+
     def _refresh_sensor(self) -> None:
         """Fetch fresh sensor data and calculate ratings."""
         debug_log("Refreshing sensor data", "ORCHESTRATOR")
