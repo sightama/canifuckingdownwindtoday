@@ -423,7 +423,7 @@ class AppOrchestrator:
             variations = {"sup": {}, "parawing": {}}
 
             for mode in ["sup", "parawing"]:
-                print(f"[WARMUP] Generating {mode} variations...")
+                print(f"[WARMUP] Generating {mode} variations...", flush=True)
                 mode_variations = self.llm_client.generate_all_variations(
                     wind_speed=reading.wind_speed_kts,
                     wind_direction=reading.wind_direction,
@@ -435,10 +435,10 @@ class AppOrchestrator:
 
                 if mode_variations:
                     variations[mode] = mode_variations
-                    print(f"[WARMUP] Got {len(mode_variations)} personas for {mode}")
+                    print(f"[WARMUP] Got {len(mode_variations)} personas for {mode}", flush=True)
                 else:
                     # Batch failed - fall back to individual calls
-                    print(f"[WARMUP] Batch failed for {mode}, trying individual calls...")
+                    print(f"[WARMUP] Batch failed for {mode}, trying individual calls...", flush=True)
                     from app.ai.personas import PERSONAS
                     for persona in PERSONAS:
                         persona_id = persona["id"]
@@ -456,12 +456,14 @@ class AppOrchestrator:
 
             self.cache.set_variations(ratings, variations)
             total = sum(len(v) for v in variations['sup'].values())
-            print(f"[WARMUP] Complete! {total} SUP variations cached")
+            print(f"[WARMUP] Complete! {total} SUP variations cached", flush=True)
 
         except Exception as e:
-            print(f"[WARMUP] ERROR: {type(e).__name__}: {e}")
+            print(f"[WARMUP] ERROR: {type(e).__name__}: {e}", flush=True)
             import traceback
             traceback.print_exc()
+            import sys
+            sys.stdout.flush()
 
     def check_and_refresh_if_needed(self) -> None:
         """
