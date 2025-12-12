@@ -25,20 +25,17 @@ async def periodic_refresh_loop():
             print(f"Periodic refresh error: {e}")
 
 
-# Startup hook - warm cache and start periodic refresh
+# Startup hook - start periodic refresh (warmup already done)
 @app.on_startup
 async def startup_warmup():
-    """Warm up cache on server startup and start periodic refresh."""
+    """Start periodic refresh (warmup already done before ui.run)."""
     import sys
-    print("[STARTUP] Starting warmup hook...", flush=True)
+    print("[STARTUP] Starting periodic refresh task...", flush=True)
     sys.stdout.flush()
 
-    loop = asyncio.get_event_loop()
-    # Run warmup in executor to avoid blocking startup
-    loop.run_in_executor(None, orchestrator.warmup_cache)
     # Start periodic refresh task
     asyncio.create_task(periodic_refresh_loop())
-    print("[STARTUP] Warmup dispatched to executor", flush=True)
+    print("[STARTUP] Periodic refresh started", flush=True)
     sys.stdout.flush()
 
 
@@ -481,6 +478,16 @@ async def index(client: Client):
 
 if __name__ in {"__main__", "__mp_main__"}:
     import os
+    import sys
+
+    # Run warmup SYNCHRONOUSLY before starting server
+    # This ensures Cloud Run's startup probe won't pass until cache is warm
+    print("[STARTUP] Running synchronous warmup before server start...", flush=True)
+    sys.stdout.flush()
+    orchestrator.warmup_cache()
+    print("[STARTUP] Warmup complete, starting NiceGUI server...", flush=True)
+    sys.stdout.flush()
+
     port = int(os.environ.get('PORT', 8080))
     ui.run(
         title='Can I Fucking Downwind Today',
