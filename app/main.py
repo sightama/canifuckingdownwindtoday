@@ -161,9 +161,13 @@ async def index(client: Client):
 
         # WHY button in top-right corner
         with ui.element('div').style('position: absolute; top: 20px; right: 20px;'):
-            why_button = ui.label('WHY').style(
-                'font-size: 14px; cursor: pointer; text-decoration: underline;'
-            )
+            with ui.row().classes('gap-4 items-center'):
+                why_button = ui.label('WHY').style(
+                    'font-size: 14px; cursor: pointer; text-decoration: underline;'
+                )
+                calc_button = ui.label('Volume-To-Weight Calc').style(
+                    'font-size: 14px; cursor: pointer; text-decoration: underline;'
+                )
 
         # WHY dialog/overlay
         with ui.dialog() as why_dialog, ui.card().style('width: 90vw; max-width: 600px; max-height: 90vh; overflow-y: auto; text-align: center;'):
@@ -250,6 +254,55 @@ async def index(client: Client):
             why_dialog.open()
 
         why_button.on('click', show_why)
+
+        # Volume Calculator Dialog
+        with ui.dialog() as calc_dialog, ui.card().style('width: 90vw; max-width: 400px; text-align: center;'):
+            ui.label('Sinker vs. Floater Calculator').classes('text-xl font-bold mb-4')
+
+            weight_input = ui.number(label='Your Weight (kg)', value=85, format='%.0f').classes('w-full')
+            volume_input = ui.number(label='Board Volume (L)', value=90, format='%.0f').classes('w-full')
+
+            result_container = ui.column().classes('w-full mt-4 gap-1')
+
+            def calculate_volume():
+                """Calculates and displays the volume-to-weight ratio analysis."""
+                result_container.clear()
+                try:
+                    weight = float(weight_input.value)
+                    volume = float(volume_input.value)
+                    ratio = volume - weight
+
+                    if ratio >= 20:
+                        title = "The Safe Zone (Positive Buoyancy)"
+                        desc = "Easy to balance, great for learning and light wind slogging. Recommended for your first 20+ sessions."
+                        color = "text-green-700"
+                    elif 10 <= ratio < 20:
+                        title = "The Sweet Spot (Lightly Positive)"
+                        desc = "Good stability, but still performance-oriented. A great all-around choice for intermediate to advanced riders."
+                        color = "text-blue-700"
+                    elif 0 <= ratio < 10:
+                        title = "The Frustration Zone (Neutral Buoyancy)"
+                        desc = "Challenging to balance while kneeling. You'll be spending a lot of time in the water. Good for progressing, but expect a learning curve."
+                        color = "text-orange-600"
+                    else:  # ratio < 0
+                        title = "The Sinker Zone (Negative Buoyancy)"
+                        desc = "This board will not float you while stationary. Requires an efficient waterstart technique. Not for the faint of heart."
+                        color = "text-red-700"
+
+                    with result_container:
+                        ui.label(f"Volume-to-Weight Ratio: {ratio:+.0f}L").classes('text-lg font-mono')
+                        ui.label(title).classes(f'text-lg font-bold {color}')
+                        ui.html(f'<p class="text-sm text-gray-600 mt-2">{desc}</p>', sanitize=False)
+
+                except (ValueError, TypeError):
+                    with result_container:
+                        ui.label("Please enter valid numbers.").classes('text-red-500')
+
+            ui.timer(0.1, calculate_volume, once=True)  # Initial calculation
+            weight_input.on('change', calculate_volume)
+            volume_input.on('change', calculate_volume)
+
+        calc_button.on('click', calc_dialog.open)
 
         # Toggle between SUP and Parawing
         with ui.row().classes('toggle-container'):
