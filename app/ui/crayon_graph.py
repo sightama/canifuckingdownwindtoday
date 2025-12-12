@@ -17,7 +17,7 @@ class CrayonGraph:
 
     # SVG dimensions
     WIDTH = 300
-    HEIGHT = 250
+    HEIGHT = 330
 
     # Coast line runs from top-left-ish to bottom-right-ish
     # Representing NNW to SSE orientation
@@ -67,6 +67,9 @@ class CrayonGraph:
 
         # Small title at top
         label_elements.append(self._make_title("Coastline / Wind", (150, 18)))
+
+        # Legend
+        label_elements.extend(self._make_legend())
 
         svg = f'''<svg width="{self.WIDTH}" height="{self.HEIGHT}" xmlns="http://www.w3.org/2000/svg" style="background: transparent;">
         <g id="textures">{chr(10).join(texture_elements)}</g>
@@ -127,6 +130,37 @@ class CrayonGraph:
                 f'<path d="{path}" stroke="{color}" stroke-width="2" fill="none" opacity="0.6"/>'
             )
 
+        return elements
+
+    def _make_legend(self) -> list[str]:
+        """Generate a legend for the graph."""
+        elements = []
+        
+        # Column 1
+        x1, y1 = 20, 270
+        
+        # Florida Land
+        elements.append(f'<circle cx="{x1 + 10}" cy="{y1 - 5}" r="4" fill="#5d8a4a" opacity="0.7"/>')
+        elements.append(self._make_label("Florida Land", "#333", (x1 + 25, y1)))
+        
+        # Coast Line
+        y2 = y1 + 30
+        elements.append(self._make_straight_line((x1, y2 - 5), (x1 + 20, y2 - 5), "blue", 3))
+        elements.append(self._make_label("Coast Line", "#333", (x1 + 25, y2)))
+
+        # Column 2
+        x2 = 160
+        
+        # Ocean
+        wave_path = f'M {x2} {y1 - 5} Q {x2 + 5} {y1 - 10} {x2 + 10} {y1 - 5} Q {x2 + 15} {y1} {x2 + 20} {y1 - 5}'
+        elements.append(f'<path d="{wave_path}" stroke="#4a90d9" stroke-width="2" fill="none" opacity="0.6"/>')
+        elements.append(self._make_label("Ocean", "#333", (x2 + 25, y1)))
+        
+        # Wind
+        elements.append(self._make_straight_line((x2, y2 - 5), (x2 + 20, y2 - 5), "red", 3))
+        elements.append(f'<path d="M {x2 + 15} {y2 - 10} L {x2 + 20} {y2 - 5} L {x2 + 15} {y2}" stroke="red" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>')
+        elements.append(self._make_label("Wind", "#333", (x2 + 25, y2)))
+        
         return elements
 
     def _make_straight_line(
