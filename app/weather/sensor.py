@@ -84,6 +84,12 @@ class SensorClient:
             utc_str = obs.get("utc_timestamp", "")
             timestamp_utc = datetime.strptime(utc_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
 
+            # Parse optional fields - may be None or missing
+            water_temp = obs.get("wtemp")
+            pressure = obs.get("pres")
+            humidity = obs.get("humidity")
+            wind_desc = obs.get("wind_desc")
+
             return SensorReading(
                 wind_speed_kts=float(obs.get("avg", 0)),
                 wind_gust_kts=float(obs.get("gust", 0)),
@@ -92,7 +98,11 @@ class SensorClient:
                 wind_degrees=int(obs.get("dir", 0)),
                 air_temp_f=float(obs.get("atemp", 0)),
                 timestamp_utc=timestamp_utc,
-                spot_name=spot.get("name", "Unknown")
+                spot_name=spot.get("name", "Unknown"),
+                water_temp_f=float(water_temp) if water_temp else None,
+                pressure_mb=float(pressure) if pressure else None,
+                humidity_pct=float(humidity) if humidity else None,
+                wind_description=wind_desc if wind_desc else None,
             )
 
         except (KeyError, IndexError, TypeError, ValueError) as e:

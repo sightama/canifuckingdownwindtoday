@@ -315,9 +315,14 @@ class AppOrchestrator:
         return {
             "wind_speed": reading.wind_speed_kts,
             "wind_direction": reading.wind_direction,
+            "wind_degrees": reading.wind_degrees,
             "wind_gust": reading.wind_gust_kts,
             "wind_lull": reading.wind_lull_kts,
+            "wind_description": reading.wind_description,
             "air_temp": reading.air_temp_f,
+            "water_temp": reading.water_temp_f,
+            "pressure": reading.pressure_mb,
+            "humidity": reading.humidity_pct,
             "wave_height": 0,  # No wave data from sensor
             "swell_direction": "N"  # No swell data from sensor
         }

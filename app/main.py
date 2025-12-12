@@ -257,17 +257,32 @@ async def index(client: Client):
                         ui.html(svg, sanitize=False).style('width: 100%; display: flex; justify-content: center; margin: 20px 0;')
 
                         ui.label('--- CONDITIONS ---').style('font-size: 18px; font-weight: bold; margin-bottom: 8px;')
-                        ui.label(f"Wind: {weather_raw.get('wind_speed', 0):.1f} kts {weather_raw.get('wind_direction', 'N')}").style('font-size: 16px;')
 
-                        # Show gust/lull if available
+                        # Wind with optional description
+                        wind_str = f"Wind: {weather_raw.get('wind_speed', 0):.1f} kts {weather_raw.get('wind_direction', 'N')}"
+                        if weather_raw.get('wind_description'):
+                            wind_str += f" ({weather_raw['wind_description']})"
+                        ui.label(wind_str).style('font-size: 16px;')
+
+                        # Show lull/gust if available
                         if weather_raw.get('wind_gust'):
-                            ui.label(f"Gusts: {weather_raw['wind_gust']:.1f} kts / Lulls: {weather_raw.get('wind_lull', 0):.1f} kts").style('font-size: 14px; color: #666;')
+                            ui.label(f"Lulls: {weather_raw.get('wind_lull', 0):.1f} kts / Gusts: {weather_raw['wind_gust']:.1f} kts").style('font-size: 14px; color: #666;')
 
+                        # Air temp
                         if weather_raw.get('air_temp'):
                             ui.label(f"Air Temp: {weather_raw['air_temp']:.0f}°F").style('font-size: 14px; color: #666;')
 
-                        # Note about no wave data
-                        ui.label('Wave/swell data not available from sensor').style('font-size: 12px; color: #999; font-style: italic; margin-top: 8px;')
+                        # Water temp
+                        if weather_raw.get('water_temp'):
+                            ui.label(f"Water Temp: {weather_raw['water_temp']:.0f}°F").style('font-size: 14px; color: #666;')
+
+                        # Pressure
+                        if weather_raw.get('pressure'):
+                            ui.label(f"Pressure: {weather_raw['pressure']:.1f} mb").style('font-size: 14px; color: #666;')
+
+                        # Humidity
+                        if weather_raw.get('humidity'):
+                            ui.label(f"Humidity: {weather_raw['humidity']:.0f}%").style('font-size: 14px; color: #666;')
 
                         if timestamp:
                             from zoneinfo import ZoneInfo

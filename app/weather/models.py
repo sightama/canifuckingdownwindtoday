@@ -3,6 +3,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Optional
 
 
 @dataclass
@@ -33,6 +34,11 @@ class SensorReading:
     air_temp_f: float
     timestamp_utc: datetime
     spot_name: str
+    # Optional fields - may not always be available from sensor
+    water_temp_f: Optional[float] = None
+    pressure_mb: Optional[float] = None
+    humidity_pct: Optional[float] = None
+    wind_description: Optional[str] = None  # e.g., "Light", "Moderate"
 
     def __str__(self) -> str:
         return (
