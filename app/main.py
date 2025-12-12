@@ -190,9 +190,6 @@ async def index(client: Client):
         # WHY button in top-right corner
         with ui.element('div').style('position: absolute; top: 20px; right: 20px;'):
             with ui.row().classes('gap-4 items-center'):
-                why_button = ui.label('WHY').style(
-                    'font-size: 14px; cursor: pointer; text-decoration: underline;'
-                )
                 calc_button = ui.label('Buoyancy Calc').style(
                     'font-size: 14px; cursor: pointer; text-decoration: underline;'
                 )
