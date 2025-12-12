@@ -300,7 +300,7 @@ async def index(client: Client):
 
             why_dialog.open()
 
-        why_button.on('click', show_why)
+        # why_button.on('click', show_why)
 
         # Volume Calculator Dialog
         with ui.dialog() as calc_dialog, ui.card().style('width: 90vw; max-width: 400px; text-align: center;'):
