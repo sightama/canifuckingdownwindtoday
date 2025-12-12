@@ -480,8 +480,18 @@ if __name__ in {"__main__", "__mp_main__"}:
     import os
     import sys
 
-    # Run warmup SYNCHRONOUSLY before starting server
-    # This ensures Cloud Run's startup probe won't pass until cache is warm
+    # Run warmup SYNCHRONOUSLY before starting the NiceGUI server.
+    #
+    # Why synchronous? Cloud Run's startup probe checks if port 8080 is open.
+    # If we ran warmup async (in background), the probe would pass immediately
+    # when NiceGUI binds to the port, but the LLM cache wouldn't be ready yet.
+    # Users hitting the site during the ~60 second warmup would see 30+ second
+    # load times while get_cached_data() triggers its own LLM calls.
+    #
+    # By running warmup synchronously BEFORE ui.run(), we ensure:
+    # 1. The startup probe only passes after cache is fully warm
+    # 2. First user always gets instant response from cached data
+    # 3. Deployment takes ~45s longer, but that's invisible to users
     print("[STARTUP] Running synchronous warmup before server start...", flush=True)
     sys.stdout.flush()
     orchestrator.warmup_cache()
