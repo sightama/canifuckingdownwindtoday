@@ -383,8 +383,10 @@ class AppOrchestrator:
         Fetches sensor data, calculates ratings, and generates all persona variations
         via batch API calls. Runs in background to avoid blocking startup.
         """
+        import sys
         try:
-            print("[WARMUP] Starting cache warmup...")
+            print("[WARMUP] Starting cache warmup...", flush=True)
+            sys.stdout.flush()
 
             # Fetch fresh sensor data
             self._refresh_sensor()

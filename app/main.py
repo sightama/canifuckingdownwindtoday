@@ -27,11 +27,17 @@ async def periodic_refresh_loop():
 @app.on_startup
 async def startup_warmup():
     """Warm up cache on server startup and start periodic refresh."""
+    import sys
+    print("[STARTUP] Starting warmup hook...", flush=True)
+    sys.stdout.flush()
+
     loop = asyncio.get_event_loop()
     # Run warmup in executor to avoid blocking startup
     loop.run_in_executor(None, orchestrator.warmup_cache)
     # Start periodic refresh task
     asyncio.create_task(periodic_refresh_loop())
+    print("[STARTUP] Warmup dispatched to executor", flush=True)
+    sys.stdout.flush()
 
 
 @ui.page('/')
