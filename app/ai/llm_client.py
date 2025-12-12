@@ -64,8 +64,9 @@ def parse_variations_response(response_text: str, mode: str = "unknown", rating:
     # Try multiple parsing strategies
 
     # Strategy 1: Split on persona markers (flexible format)
-    # Handles: ===PERSONA:id===, **===PERSONA:id===**, ## PERSONA: id, etc.
-    parts = re.split(r'[=\*#\s]*PERSONA[:\s]+(\w+)[=\*#\s]*', response_text, flags=re.IGNORECASE)
+    # Handles: ===PERSONA:id===, ===id===, **PERSONA:id**, etc.
+    # PERSONA: prefix is optional since LLMs sometimes omit it
+    parts = re.split(r'[=\*#]+\s*(?:PERSONA[:\s]+)?(\w+)\s*[=\*#]+', response_text, flags=re.IGNORECASE)
 
     # parts[0] is empty or preamble, then alternating: persona_id, content, persona_id, content...
     for i in range(1, len(parts), 2):
@@ -88,7 +89,8 @@ def parse_variations_response(response_text: str, mode: str = "unknown", rating:
 
         for persona_id in persona_ids:
             # Find this persona's section
-            pattern = rf'(?:^|\n)[#\*\s]*{re.escape(persona_id)}[#\*:\s]*\n(.*?)(?=(?:\n[#\*\s]*(?:{"|".join(persona_ids)})[#\*:\s]*\n)|$)'
+            # Include = in delimiters since LLMs often use ===ID=== format
+            pattern = rf'(?:^|\n)[#\*=\s]*{re.escape(persona_id)}[#\*=:\s]*\n(.*?)(?=(?:\n[#\*=\s]*(?:{"|".join(persona_ids)})[#\*=:\s]*\n)|$)'
             match = re.search(pattern, response_text, re.IGNORECASE | re.DOTALL)
             if match:
                 content = match.group(1).strip()
