@@ -18,7 +18,9 @@ async def periodic_refresh_loop():
     while True:
         await asyncio.sleep(300)  # 5 minutes
         try:
-            orchestrator.check_and_refresh_if_needed()
+            # Run in executor to avoid blocking the event loop (kills WebSocket heartbeats)
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, orchestrator.check_and_refresh_if_needed)
         except Exception as e:
             print(f"Periodic refresh error: {e}")
 
@@ -190,9 +192,11 @@ async def index(client: Client):
 
         # WHY button in top-right corner
         with ui.element('div').style('position: absolute; top: 20px; right: 20px;'):
-            why_button = ui.label('WHY').style(
-                'font-size: 14px; cursor: pointer; text-decoration: underline;'
-            )
+            why_button = ui.button('WHY').style(
+                'font-size: 18px; font-weight: bold; padding: 10px 20px; '
+                'background: black; color: white; border: none; '
+                'border-radius: 25px; cursor: pointer;'
+            ).props('flat')
 
         # WHY dialog/overlay
         with ui.dialog() as why_dialog, ui.card().style('width: 90vw; max-width: 600px; max-height: 90vh; overflow-y: auto; text-align: center;'):
@@ -305,7 +309,7 @@ async def index(client: Client):
         # Toggle between SUP and Parawing
         with ui.row().classes('toggle-container'):
             toggle = ui.toggle(
-                ['SUP Foil', 'Trashbaggers'],
+                ['SUP Foil', 'Parawing'],
                 value='SUP Foil'
             ).style('border: 2px solid #000000; padding: 5px;')
 
@@ -341,8 +345,9 @@ async def index(client: Client):
                 # Store the new persona ID
                 await ui.run_javascript(f"setLastPersona('{current_persona_id}')")
 
-                # Read from cache (should already be warmed up)
-                cached_data = orchestrator.get_cached_data()
+                # Read from cache in executor to avoid blocking WebSocket heartbeats
+                loop = asyncio.get_event_loop()
+                cached_data = await loop.run_in_executor(None, orchestrator.get_cached_data)
 
                 # Get foil recommendations
                 ratings = cached_data.get('ratings') if cached_data else None
@@ -355,7 +360,8 @@ async def index(client: Client):
 
             except Exception as e:
                 print(f"Initial load error: {e}")
-                cached_data = orchestrator.get_cached_data()
+                loop = asyncio.get_event_loop()
+                cached_data = await loop.run_in_executor(None, orchestrator.get_cached_data)
 
         def update_display():
             """Update display based on toggle selection using cached data"""
