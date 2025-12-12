@@ -165,7 +165,7 @@ async def index(client: Client):
                 why_button = ui.label('WHY').style(
                     'font-size: 14px; cursor: pointer; text-decoration: underline;'
                 )
-                calc_button = ui.label('Volume-To-Weight Calc').style(
+                calc_button = ui.label('Buoyancy Calc').style(
                     'font-size: 14px; cursor: pointer; text-decoration: underline;'
                 )
 
@@ -259,6 +259,7 @@ async def index(client: Client):
         with ui.dialog() as calc_dialog, ui.card().style('width: 90vw; max-width: 400px; text-align: center;'):
             ui.label('Sinker vs. Floater Calculator').classes('text-xl font-bold mb-4')
 
+            unit_toggle = ui.toggle(['kg', 'lbs'], value='kg').classes('mb-2')
             weight_input = ui.number(label='Your Weight (kg)', value=85, format='%.0f').classes('w-full')
             volume_input = ui.number(label='Board Volume (L)', value=90, format='%.0f').classes('w-full')
 
@@ -269,6 +270,11 @@ async def index(client: Client):
                 result_container.clear()
                 try:
                     weight = float(weight_input.value)
+                    
+                    # Convert lbs to kg for calculation
+                    if unit_toggle.value == 'lbs':
+                        weight = weight * 0.453592
+
                     volume = float(volume_input.value)
                     ratio = volume - weight
 
@@ -298,6 +304,18 @@ async def index(client: Client):
                     with result_container:
                         ui.label("Please enter valid numbers.").classes('text-red-500')
 
+            def toggle_units():
+                if unit_toggle.value == 'lbs':
+                    weight_input.label = 'Your Weight (lbs)'
+                    if weight_input.value:
+                        weight_input.value = round(float(weight_input.value) * 2.20462)
+                else:
+                    weight_input.label = 'Your Weight (kg)'
+                    if weight_input.value:
+                        weight_input.value = round(float(weight_input.value) / 2.20462)
+                calculate_volume()
+
+            unit_toggle.on_value_change(toggle_units)
             ui.timer(0.1, calculate_volume, once=True)  # Initial calculation
             weight_input.on('change', calculate_volume)
             volume_input.on('change', calculate_volume)
