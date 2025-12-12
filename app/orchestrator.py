@@ -392,27 +392,32 @@ class AppOrchestrator:
 
             # Fetch fresh sensor data
             self._refresh_sensor()
+            print("[WARMUP] Sensor refresh done", flush=True)
 
             # Check if we went offline during sensor fetch
-            if self.cache.is_offline():
-                print("[WARMUP] Sensor offline - generating offline variations")
+            is_offline = self.cache.is_offline()
+            print(f"[WARMUP] is_offline={is_offline}", flush=True)
+            if is_offline:
+                print("[WARMUP] Sensor offline - generating offline variations", flush=True)
                 self._ensure_offline_variations()
                 return
 
             # Get current ratings
             sensor_data = self.cache.get_sensor()
+            print(f"[WARMUP] sensor_data={sensor_data is not None}", flush=True)
             if not sensor_data or not sensor_data.get("reading"):
-                print("[WARMUP] No sensor data available - skipping")
+                print("[WARMUP] No sensor data available - skipping", flush=True)
                 return
 
             reading = sensor_data["reading"]
             ratings = sensor_data.get("ratings", {})
+            print(f"[WARMUP] ratings={ratings}", flush=True)
 
             if not ratings or "sup" not in ratings:
-                print(f"[WARMUP] ERROR: Invalid ratings: {ratings}")
+                print(f"[WARMUP] ERROR: Invalid ratings: {ratings}", flush=True)
                 return
 
-            print(f"[WARMUP] Sensor OK: {reading.wind_speed_kts}kts {reading.wind_direction}, ratings={ratings}")
+            print(f"[WARMUP] Proceeding to generate variations for {reading.wind_speed_kts}kts {reading.wind_direction}", flush=True)
 
             # Generate all variations for both modes via batch calls
             variations = {"sup": {}, "parawing": {}}
