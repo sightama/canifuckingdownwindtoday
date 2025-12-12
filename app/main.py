@@ -190,14 +190,6 @@ async def index(client: Client):
         # Title
         ui.html('<div class="title">CAN I FUCKING DOWNWIND TODAY</div>', sanitize=False)
 
-        # WHY button in top-right corner
-        with ui.element('div').style('position: absolute; top: 20px; right: 20px;'):
-            why_button = ui.button('WHY').style(
-                'font-size: 18px; font-weight: bold; padding: 10px 20px; '
-                'background: black; color: white; border: none; '
-                'border-radius: 25px; cursor: pointer;'
-            ).props('flat')
-
         # WHY dialog/overlay
         with ui.dialog() as why_dialog, ui.card().style('width: 90vw; max-width: 600px; max-height: 90vh; overflow-y: auto; text-align: center;'):
             ui.label('WHY THIS SCORE?').style('font-size: 24px; font-weight: bold; margin-bottom: 16px; width: 100%; text-align: center;')
@@ -304,8 +296,6 @@ async def index(client: Client):
 
             why_dialog.open()
 
-        why_button.on('click', show_why)
-
         # Toggle between SUP and Parawing
         with ui.row().classes('toggle-container'):
             toggle = ui.toggle(
@@ -316,6 +306,25 @@ async def index(client: Client):
         # Rating display (will update based on toggle)
         rating_label = ui.html('<div class="rating">--/10</div>', sanitize=False)
         description_label = ui.html('<div class="description">Loading conditions...</div>', sanitize=False)
+
+        # WHY button - styled to match toggle, positioned in content flow
+        why_button = ui.button('EXPLAIN YOURSELF').style(
+            'font-size: 16px; font-weight: bold; padding: 8px 20px; '
+            'background: white; color: black; border: 2px solid black; '
+            'cursor: pointer; margin-top: 20px;'
+        ).props('flat')
+
+        def on_hover_enter():
+            why_button.style('background: black; color: white;')
+
+        def on_hover_leave():
+            why_button.style(
+                'background: white; color: black; border: 2px solid black;'
+            )
+
+        why_button.on('mouseover', on_hover_enter)
+        why_button.on('mouseout', on_hover_leave)
+        why_button.on('click', show_why)
 
         # Last updated timestamp
         timestamp_label = ui.html('<div class="timestamp">Last updated: --</div>', sanitize=False)
