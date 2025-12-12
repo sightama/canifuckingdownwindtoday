@@ -206,19 +206,21 @@ class AppOrchestrator:
 
     def _refresh_sensor(self) -> None:
         """Fetch fresh sensor data and calculate ratings."""
-        debug_log("Refreshing sensor data", "ORCHESTRATOR")
+        print("[SENSOR] Fetching sensor data...", flush=True)
 
         reading = self.sensor_client.fetch()
 
         if reading is None:
-            log.warning("Sensor fetch returned None - marking offline")
+            print("[SENSOR] Fetch returned None - marking offline", flush=True)
             self.cache.set_offline(self.cache.get_last_known_reading())
             self._ensure_offline_variations()
             return
 
+        print(f"[SENSOR] Got reading: {reading.wind_speed_kts}kts {reading.wind_direction}", flush=True)
+
         # Check if reading itself is stale (sensor hasn't updated)
         if reading.is_stale(threshold_seconds=Config.SENSOR_STALE_THRESHOLD_SECONDS):
-            log.warning(f"Sensor reading is stale: {reading.timestamp_utc}")
+            print(f"[SENSOR] Reading is stale: {reading.timestamp_utc}", flush=True)
             self.cache.set_offline(reading)
             self._ensure_offline_variations()
             return
@@ -233,7 +235,7 @@ class AppOrchestrator:
         }
 
         self.cache.set_sensor(reading, ratings)
-        debug_log(f"Sensor cache updated: {reading.wind_speed_kts}kts {reading.wind_direction}", "ORCHESTRATOR")
+        print(f"[SENSOR] Cached: ratings={ratings}", flush=True)
 
     def _refresh_variations(self, ratings: dict[str, int]) -> None:
         """Generate fresh LLM variations for current ratings."""
@@ -315,9 +317,14 @@ class AppOrchestrator:
         return {
             "wind_speed": reading.wind_speed_kts,
             "wind_direction": reading.wind_direction,
+            "wind_degrees": reading.wind_degrees,
             "wind_gust": reading.wind_gust_kts,
             "wind_lull": reading.wind_lull_kts,
+            "wind_description": reading.wind_description,
             "air_temp": reading.air_temp_f,
+            "water_temp": reading.water_temp_f,
+            "pressure": reading.pressure_mb,
+            "humidity": reading.humidity_pct,
             "wave_height": 0,  # No wave data from sensor
             "swell_direction": "N"  # No swell data from sensor
         }
@@ -370,3 +377,146 @@ class AppOrchestrator:
             "code": self.foil_recommender.recommend_code(score=score),
             "kt": self.foil_recommender.recommend_kt(score=score)
         }
+
+    def warmup_cache(self) -> None:
+        """
+        Warm up cache on server startup.
+
+        Fetches sensor data, calculates ratings, and generates all persona variations
+        via batch API calls. Runs in background to avoid blocking startup.
+        """
+        import sys
+        try:
+            print("[WARMUP] Starting cache warmup...", flush=True)
+            sys.stdout.flush()
+
+            # Fetch fresh sensor data
+            self._refresh_sensor()
+            print("[WARMUP] Sensor refresh done", flush=True)
+
+            # Check if we went offline during sensor fetch
+            is_offline = self.cache.is_offline()
+            print(f"[WARMUP] is_offline={is_offline}", flush=True)
+            if is_offline:
+                print("[WARMUP] Sensor offline - generating offline variations", flush=True)
+                self._ensure_offline_variations()
+                return
+
+            # Get current ratings
+            sensor_data = self.cache.get_sensor()
+            print(f"[WARMUP] sensor_data={sensor_data is not None}", flush=True)
+            if not sensor_data or not sensor_data.get("reading"):
+                print("[WARMUP] No sensor data available - skipping", flush=True)
+                return
+
+            reading = sensor_data["reading"]
+            ratings = sensor_data.get("ratings", {})
+            print(f"[WARMUP] ratings={ratings}", flush=True)
+
+            if not ratings or "sup" not in ratings:
+                print(f"[WARMUP] ERROR: Invalid ratings: {ratings}", flush=True)
+                return
+
+            print(f"[WARMUP] Proceeding to generate variations for {reading.wind_speed_kts}kts {reading.wind_direction}", flush=True)
+
+            # Generate all variations for both modes via batch calls
+            variations = {"sup": {}, "parawing": {}}
+
+            for mode in ["sup", "parawing"]:
+                print(f"[WARMUP] Generating {mode} variations...", flush=True)
+                mode_variations = self.llm_client.generate_all_variations(
+                    wind_speed=reading.wind_speed_kts,
+                    wind_direction=reading.wind_direction,
+                    wave_height=0,
+                    swell_direction="N",
+                    rating=ratings[mode],
+                    mode=mode
+                )
+
+                if mode_variations:
+                    variations[mode] = mode_variations
+                    print(f"[WARMUP] Got {len(mode_variations)} personas for {mode}", flush=True)
+                else:
+                    # Batch failed - fall back to individual calls
+                    print(f"[WARMUP] Batch failed for {mode}, trying individual calls...", flush=True)
+                    from app.ai.personas import PERSONAS
+                    for persona in PERSONAS:
+                        persona_id = persona["id"]
+                        persona_variations = self.llm_client.generate_single_persona_variations(
+                            wind_speed=reading.wind_speed_kts,
+                            wind_direction=reading.wind_direction,
+                            wave_height=0,
+                            swell_direction="N",
+                            rating=ratings[mode],
+                            mode=mode,
+                            persona_id=persona_id
+                        )
+                        if persona_variations:
+                            variations[mode][persona_id] = persona_variations
+
+            self.cache.set_variations(ratings, variations)
+            total = sum(len(v) for v in variations['sup'].values())
+            print(f"[WARMUP] Complete! {total} SUP variations cached", flush=True)
+
+        except Exception as e:
+            print(f"[WARMUP] ERROR: {type(e).__name__}: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            import sys
+            sys.stdout.flush()
+
+    def check_and_refresh_if_needed(self) -> None:
+        """
+        Check if ratings changed significantly and refresh variations if needed.
+
+        Called periodically (every 5 minutes) to keep cache fresh.
+        Regenerates all variations if rating changed by more than 2 points.
+        """
+        debug_log("Checking if cache refresh needed", "ORCHESTRATOR")
+
+        # Fetch fresh sensor data
+        old_ratings = self.cache.get_ratings()
+        self._refresh_sensor()
+
+        # Check if we went offline
+        if self.cache.is_offline():
+            debug_log("Sensor offline during refresh check", "ORCHESTRATOR")
+            self._ensure_offline_variations()
+            return
+
+        # Get new ratings
+        new_ratings = self.cache.get_ratings()
+        if not new_ratings:
+            debug_log("No ratings available for refresh check", "ORCHESTRATOR")
+            return
+
+        # Compare ratings to cached snapshot
+        variations_cache = self.cache.get_all_variations()
+        if not variations_cache:
+            debug_log("No variations cache - triggering warmup", "ORCHESTRATOR")
+            self.warmup_cache()
+            return
+
+        old_snapshot = variations_cache.get("rating_snapshot", {})
+
+        # Check if rating changed significantly
+        if self._ratings_changed_significantly(new_ratings, old_snapshot):
+            debug_log(f"Rating changed significantly: {old_snapshot} -> {new_ratings}, regenerating variations", "ORCHESTRATOR")
+            self._refresh_variations(new_ratings)
+        else:
+            debug_log(f"Rating unchanged or minor change: {old_snapshot} -> {new_ratings}", "ORCHESTRATOR")
+
+    def _ratings_changed_significantly(self, new_ratings: dict, old_ratings: dict) -> bool:
+        """
+        Check if either SUP or parawing rating changed by more than 2 points.
+
+        Args:
+            new_ratings: Current ratings {"sup": int, "parawing": int}
+            old_ratings: Previous ratings {"sup": int, "parawing": int}
+
+        Returns:
+            True if delta > 2 for either mode
+        """
+        sup_delta = abs(new_ratings.get("sup", 0) - old_ratings.get("sup", 0))
+        parawing_delta = abs(new_ratings.get("parawing", 0) - old_ratings.get("parawing", 0))
+        return sup_delta > 2 or parawing_delta > 2

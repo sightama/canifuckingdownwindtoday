@@ -77,7 +77,8 @@ jobs:
             --platform=managed \
             --allow-unauthenticated \
             --set-secrets=GEMINI_API_KEY=GEMINI_API_KEY:latest,WF_TOKEN=wf-token:latest \
-            --min-instances=0 \
+            --set-env-vars=DEBUG=true \
+            --min-instances=1 \
             --max-instances=1 \
             --memory=512Mi \
             --cpu=1 \

@@ -219,9 +219,10 @@ class CacheManager:
         sup_personas = variations.get("sup", {})
         parawing_personas = variations.get("parawing", {})
 
-        # Need at least some variations for both modes
-        # A "complete" cache has multiple personas (not just the initial one)
-        return len(sup_personas) >= 4 and len(parawing_personas) >= 4
+        # Check if we have all 6 personas for both modes
+        from app.ai.personas import PERSONAS
+        expected_count = len(PERSONAS)
+        return len(sup_personas) >= expected_count and len(parawing_personas) >= expected_count
 
     # ==================== Offline State ====================
 

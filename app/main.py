@@ -1,7 +1,8 @@
 # ABOUTME: Main NiceGUI web application entry point
 # ABOUTME: Provides simple 90s-style UI for downwind condition ratings
 
-from nicegui import ui, Client
+import asyncio
+from nicegui import ui, Client, app
 from app.config import Config
 from app.orchestrator import AppOrchestrator
 from app.ui.crayon_graph import CrayonGraph
@@ -9,6 +10,33 @@ from app.ui.crayon_graph import CrayonGraph
 
 # Initialize orchestrator
 orchestrator = AppOrchestrator(api_key=Config.GEMINI_API_KEY)
+
+
+# Periodic refresh task - runs in background
+async def periodic_refresh_loop():
+    """Background loop that checks cache refresh every 5 minutes."""
+    while True:
+        await asyncio.sleep(300)  # 5 minutes
+        try:
+            # Run in executor to avoid blocking the event loop (kills WebSocket heartbeats)
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, orchestrator.check_and_refresh_if_needed)
+        except Exception as e:
+            print(f"Periodic refresh error: {e}")
+
+
+# Startup hook - start periodic refresh (warmup already done)
+@app.on_startup
+async def startup_warmup():
+    """Start periodic refresh (warmup already done before ui.run)."""
+    import sys
+    print("[STARTUP] Starting periodic refresh task...", flush=True)
+    sys.stdout.flush()
+
+    # Start periodic refresh task
+    asyncio.create_task(periodic_refresh_loop())
+    print("[STARTUP] Periodic refresh started", flush=True)
+    sys.stdout.flush()
 
 
 @ui.page('/')
@@ -176,18 +204,19 @@ async def index(client: Client):
             # Weather conditions section
             conditions_container = ui.column().style('width: 100%; margin-bottom: 24px; align-items: center;')
 
+            # Foil recommendations (dynamic, updated with conditions)
+            with ui.column().style('width: 100%; margin-bottom: 16px; align-items: center;'):
+                ui.label('--- FOIL RECOMMENDATIONS ---').style('font-size: 18px; font-weight: bold; margin-bottom: 8px;')
+                code_rec = ui.html('<div class="rec-item">CODE: Loading...</div>', sanitize=False)
+                kt_rec = ui.html('<div class="rec-item">KT: Loading...</div>', sanitize=False)
+                ui.label('* Recommendations for 195lb/88kg rider').style(
+                    'font-size: 12px; color: #666; margin-top: 8px; font-style: italic;'
+                )
+
             ui.label('--- LIVE CAMS ---').style('font-size: 18px; font-weight: bold; margin: 16px 0; width: 100%; text-align: center;')
 
             # Video streams section
             with ui.column().style('width: 100%; gap: 16px; align-items: center;'):
-                # Palm Beach Marriott cam
-                ui.label('Palm Beach Marriott').style('font-size: 14px; font-weight: bold;')
-                ui.html('''
-                    <iframe src="https://video-monitoring.com/beachcams/palmbeachmarriott/stream.htm"
-                            style="width: 100%; height: 200px; border: 1px solid #000;"
-                            allow="autoplay" allowfullscreen></iframe>
-                ''', sanitize=False)
-
                 # Jupiter Inlet cam (YouTube)
                 ui.label('Jupiter Inlet').style('font-size: 14px; font-weight: bold;')
                 ui.html('''
@@ -204,9 +233,13 @@ async def index(client: Client):
                             allow="autoplay; encrypted-media" allowfullscreen></iframe>
                 ''', sanitize=False)
 
-            ui.label('* Recommendations for 195lb/88kg rider').style(
-                'font-size: 12px; color: #666; margin-top: 16px; font-style: italic;'
-            )
+                # Palm Beach Marriott cam (no autoplay)
+                ui.label('Palm Beach Marriott').style('font-size: 14px; font-weight: bold;')
+                ui.html('''
+                    <iframe src="https://video-monitoring.com/beachcams/palmbeachmarriott/stream.htm"
+                            style="width: 100%; height: 200px; border: 1px solid #000;"
+                            allow="autoplay" allowfullscreen></iframe>
+                ''', sanitize=False)
 
         def show_why():
             """Populate and show the WHY dialog"""
@@ -233,20 +266,37 @@ async def index(client: Client):
                         ui.html(svg, sanitize=False).style('width: 100%; display: flex; justify-content: center; margin: 20px 0;')
 
                         ui.label('--- CONDITIONS ---').style('font-size: 18px; font-weight: bold; margin-bottom: 8px;')
-                        ui.label(f"Wind: {weather_raw.get('wind_speed', 0):.1f} kts {weather_raw.get('wind_direction', 'N')}").style('font-size: 16px;')
 
-                        # Show gust/lull if available
+                        # Wind with optional description
+                        wind_str = f"Wind: {weather_raw.get('wind_speed', 0):.1f} kts {weather_raw.get('wind_direction', 'N')}"
+                        if weather_raw.get('wind_description'):
+                            wind_str += f" ({weather_raw['wind_description']})"
+                        ui.label(wind_str).style('font-size: 16px;')
+
+                        # Show lull/gust if available
                         if weather_raw.get('wind_gust'):
-                            ui.label(f"Gusts: {weather_raw['wind_gust']:.1f} kts / Lulls: {weather_raw.get('wind_lull', 0):.1f} kts").style('font-size: 14px; color: #666;')
+                            ui.label(f"Lulls: {weather_raw.get('wind_lull', 0):.1f} kts / Gusts: {weather_raw['wind_gust']:.1f} kts").style('font-size: 14px; color: #666;')
 
+                        # Air temp
                         if weather_raw.get('air_temp'):
                             ui.label(f"Air Temp: {weather_raw['air_temp']:.0f}°F").style('font-size: 14px; color: #666;')
 
-                        # Note about no wave data
-                        ui.label('Wave/swell data not available from sensor').style('font-size: 12px; color: #999; font-style: italic; margin-top: 8px;')
+                        # Water temp
+                        if weather_raw.get('water_temp'):
+                            ui.label(f"Water Temp: {weather_raw['water_temp']:.0f}°F").style('font-size: 14px; color: #666;')
+
+                        # Pressure
+                        if weather_raw.get('pressure'):
+                            ui.label(f"Pressure: {weather_raw['pressure']:.1f} mb").style('font-size: 14px; color: #666;')
+
+                        # Humidity
+                        if weather_raw.get('humidity'):
+                            ui.label(f"Humidity: {weather_raw['humidity']:.0f}%").style('font-size: 14px; color: #666;')
 
                         if timestamp:
-                            ui.label(f"Data from: {timestamp.strftime('%Y-%m-%d %H:%M UTC')}").style('font-size: 12px; color: #666; margin-top: 8px;')
+                            from zoneinfo import ZoneInfo
+                            est_timestamp = timestamp.astimezone(ZoneInfo("America/New_York"))
+                            ui.label(f"Data from: {est_timestamp.strftime('%Y-%m-%d %H:%M EST')}").style('font-size: 12px; color: #666; margin-top: 8px;')
             else:
                 with conditions_container:
                     ui.label('Weather data unavailable').style('font-size: 16px; color: #666;')
@@ -325,7 +375,7 @@ async def index(client: Client):
         # Toggle between SUP and Parawing
         with ui.row().classes('toggle-container'):
             toggle = ui.toggle(
-                ['SUP Foil', 'Trashbaggers'],
+                ['SUP Foil', 'Parawing'],
                 value='SUP Foil'
             ).style('border: 2px solid #000000; padding: 5px;')
 
@@ -333,11 +383,24 @@ async def index(client: Client):
         rating_label = ui.html('<div class="rating">--/10</div>', sanitize=False)
         description_label = ui.html('<div class="description">Loading conditions...</div>', sanitize=False)
 
-        # Foil recommendations
-        with ui.column().classes('recommendations'):
-            ui.html('<div class="rec-title">--- FOIL RECOMMENDATIONS ---</div>', sanitize=False)
-            code_rec = ui.html('<div class="rec-item">CODE: Loading...</div>', sanitize=False)
-            kt_rec = ui.html('<div class="rec-item">KT: Loading...</div>', sanitize=False)
+        # WHY button - styled to match toggle, positioned in content flow
+        why_button = ui.button('EXPLAIN YOURSELF').style(
+            'font-size: 16px; font-weight: bold; padding: 8px 20px; '
+            'background: white; color: black; border: 2px solid black; '
+            'cursor: pointer; margin-top: 20px;'
+        ).props('flat')
+
+        def on_hover_enter():
+            why_button.style('background: black; color: white;')
+
+        def on_hover_leave():
+            why_button.style(
+                'background: white; color: black; border: 2px solid black;'
+            )
+
+        why_button.on('mouseover', on_hover_enter)
+        why_button.on('mouseout', on_hover_leave)
+        why_button.on('click', show_why)
 
         # Last updated timestamp
         timestamp_label = ui.html('<div class="timestamp">Last updated: --</div>', sanitize=False)
@@ -347,8 +410,8 @@ async def index(client: Client):
         current_persona_id = None
         cached_recommendations = None
 
-        async def fast_initial_load():
-            """Fast path: fetch sensor + 1 persona only, show page immediately"""
+        async def load_initial_data():
+            """Load data from cache (already warmed up on startup)"""
             nonlocal cached_data, current_persona_id, cached_recommendations
             try:
                 from app.ai.personas import get_random_persona
@@ -367,8 +430,9 @@ async def index(client: Client):
                 # Store the new persona ID
                 await ui.run_javascript(f"setLastPersona('{current_persona_id}')")
 
-                # FAST PATH: Get initial data with single persona
-                cached_data = orchestrator.get_initial_data(persona_id=current_persona_id)
+                # Read from cache in executor to avoid blocking WebSocket heartbeats
+                loop = asyncio.get_event_loop()
+                cached_data = await loop.run_in_executor(None, orchestrator.get_cached_data)
 
                 # Get foil recommendations
                 ratings = cached_data.get('ratings') if cached_data else None
@@ -380,26 +444,9 @@ async def index(client: Client):
                     cached_recommendations = orchestrator.get_foil_recommendations()
 
             except Exception as e:
-                print(f"Fast initial load error: {e}")
-                # Fallback to full load on error
-                cached_data = orchestrator.get_cached_data()
-
-        async def background_refresh():
-            """Background: fetch remaining personas and parawing mode"""
-            try:
-                if current_persona_id and cached_data and not cached_data.get("is_offline"):
-                    # Run in executor to not block UI
-                    import asyncio
-                    loop = asyncio.get_event_loop()
-                    await loop.run_in_executor(
-                        None,
-                        lambda: orchestrator.refresh_remaining_variations(
-                            initial_persona_id=current_persona_id,
-                            initial_mode="sup"
-                        )
-                    )
-            except Exception as e:
-                print(f"Background refresh error: {e}")
+                print(f"Initial load error: {e}")
+                loop = asyncio.get_event_loop()
+                cached_data = await loop.run_in_executor(None, orchestrator.get_cached_data)
 
         def update_display():
             """Update display based on toggle selection using cached data"""
@@ -449,7 +496,8 @@ async def index(client: Client):
                     else:
                         # ONLINE STATE
                         if current_persona_id:
-                            score = cached_data['ratings'][mode]
+                            ratings = cached_data.get('ratings') or {}
+                            score = ratings.get(mode, 0)
                             description = orchestrator.get_random_variation(mode, current_persona_id)
 
                             rating_label.content = f'<div class="rating">{score}/10</div>'
@@ -498,23 +546,37 @@ async def index(client: Client):
         # Update on toggle change (instant since data is cached)
         toggle.on_value_change(lambda: update_display())
 
-        # Initial load: fast path then background refresh
+        # Initial load: just read from cache and display
         async def initial_load():
-            await fast_initial_load()
+            await load_initial_data()
             update_display()
             await show_content()
-            # Start background refresh after page is visible (if client still connected)
-            try:
-                ui.timer(0.5, background_refresh, once=True)
-            except Exception:
-                # Client disconnected before we could start background refresh - that's fine
-                pass
 
         ui.timer(0.1, initial_load, once=True)
 
 
 if __name__ in {"__main__", "__mp_main__"}:
     import os
+    import sys
+
+    # Run warmup SYNCHRONOUSLY before starting the NiceGUI server.
+    #
+    # Why synchronous? Cloud Run's startup probe checks if port 8080 is open.
+    # If we ran warmup async (in background), the probe would pass immediately
+    # when NiceGUI binds to the port, but the LLM cache wouldn't be ready yet.
+    # Users hitting the site during the ~60 second warmup would see 30+ second
+    # load times while get_cached_data() triggers its own LLM calls.
+    #
+    # By running warmup synchronously BEFORE ui.run(), we ensure:
+    # 1. The startup probe only passes after cache is fully warm
+    # 2. First user always gets instant response from cached data
+    # 3. Deployment takes ~45s longer, but that's invisible to users
+    print("[STARTUP] Running synchronous warmup before server start...", flush=True)
+    sys.stdout.flush()
+    orchestrator.warmup_cache()
+    print("[STARTUP] Warmup complete, starting NiceGUI server...", flush=True)
+    sys.stdout.flush()
+
     port = int(os.environ.get('PORT', 8080))
     ui.run(
         title='Can I Fucking Downwind Today',

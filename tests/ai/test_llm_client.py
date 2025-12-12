@@ -158,6 +158,31 @@ class TestBatchVariationGeneration:
         assert len(result["angry_coach"]) == 3
         assert "Response one" in result["drill_sergeant"][0]
 
+    def test_parse_variations_handles_format_without_persona_prefix(self):
+        """Parser handles LLM output with just ===ID=== format (no PERSONA: prefix)"""
+        # This is the actual format Gemini sometimes outputs in production
+        response = """===DRILL_SERGEANT===
+1. What in the goddamn hell is this rating, maggot? You call that foiling?
+2. You call that a rating, soldier? It's a goddamn insult to the ocean.
+3. This ain't a floaty-boat cruise, you soft bastard.
+===DISAPPOINTED_DAD===
+1. Sigh. I'm not mad, just disappointed. Like always.
+2. Your brother would have checked the conditions first.
+===JADED_LOCAL===
+1. Back in my day, we didn't need ratings. We just knew.
+2. Another tourist asking about conditions. Great."""
+
+        from app.ai.llm_client import parse_variations_response
+        result = parse_variations_response(response)
+
+        assert "drill_sergeant" in result
+        assert "disappointed_dad" in result
+        assert "jaded_local" in result
+        assert len(result["drill_sergeant"]) == 3
+        assert len(result["disappointed_dad"]) == 2
+        assert len(result["jaded_local"]) == 2
+        assert "maggot" in result["drill_sergeant"][0]
+
 
 class TestOfflineVariations:
     """Tests for generating offline persona responses"""
