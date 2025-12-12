@@ -399,7 +399,8 @@ async def index(client: Client):
                     else:
                         # ONLINE STATE
                         if current_persona_id:
-                            score = cached_data['ratings'][mode]
+                            ratings = cached_data.get('ratings') or {}
+                            score = ratings.get(mode, 0)
                             description = orchestrator.get_random_variation(mode, current_persona_id)
 
                             rating_label.content = f'<div class="rating">{score}/10</div>'
