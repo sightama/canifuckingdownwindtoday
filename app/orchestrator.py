@@ -206,19 +206,21 @@ class AppOrchestrator:
 
     def _refresh_sensor(self) -> None:
         """Fetch fresh sensor data and calculate ratings."""
-        debug_log("Refreshing sensor data", "ORCHESTRATOR")
+        print("[SENSOR] Fetching sensor data...", flush=True)
 
         reading = self.sensor_client.fetch()
 
         if reading is None:
-            log.warning("Sensor fetch returned None - marking offline")
+            print("[SENSOR] Fetch returned None - marking offline", flush=True)
             self.cache.set_offline(self.cache.get_last_known_reading())
             self._ensure_offline_variations()
             return
 
+        print(f"[SENSOR] Got reading: {reading.wind_speed_kts}kts {reading.wind_direction}", flush=True)
+
         # Check if reading itself is stale (sensor hasn't updated)
         if reading.is_stale(threshold_seconds=Config.SENSOR_STALE_THRESHOLD_SECONDS):
-            log.warning(f"Sensor reading is stale: {reading.timestamp_utc}")
+            print(f"[SENSOR] Reading is stale: {reading.timestamp_utc}", flush=True)
             self.cache.set_offline(reading)
             self._ensure_offline_variations()
             return
@@ -233,7 +235,7 @@ class AppOrchestrator:
         }
 
         self.cache.set_sensor(reading, ratings)
-        debug_log(f"Sensor cache updated: {reading.wind_speed_kts}kts {reading.wind_direction}", "ORCHESTRATOR")
+        print(f"[SENSOR] Cached: ratings={ratings}", flush=True)
 
     def _refresh_variations(self, ratings: dict[str, int]) -> None:
         """Generate fresh LLM variations for current ratings."""
