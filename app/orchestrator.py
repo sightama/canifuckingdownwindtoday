@@ -383,64 +383,76 @@ class AppOrchestrator:
         Fetches sensor data, calculates ratings, and generates all persona variations
         via batch API calls. Runs in background to avoid blocking startup.
         """
-        debug_log("Starting cache warmup", "ORCHESTRATOR")
+        try:
+            print("[WARMUP] Starting cache warmup...")
 
-        # Fetch fresh sensor data
-        self._refresh_sensor()
+            # Fetch fresh sensor data
+            self._refresh_sensor()
 
-        # Check if we went offline during sensor fetch
-        if self.cache.is_offline():
-            debug_log("Sensor offline during warmup - generating offline variations", "ORCHESTRATOR")
-            self._ensure_offline_variations()
-            return
+            # Check if we went offline during sensor fetch
+            if self.cache.is_offline():
+                print("[WARMUP] Sensor offline - generating offline variations")
+                self._ensure_offline_variations()
+                return
 
-        # Get current ratings
-        sensor_data = self.cache.get_sensor()
-        if not sensor_data or not sensor_data.get("reading"):
-            debug_log("No sensor data available for warmup", "ORCHESTRATOR")
-            return
+            # Get current ratings
+            sensor_data = self.cache.get_sensor()
+            if not sensor_data or not sensor_data.get("reading"):
+                print("[WARMUP] No sensor data available - skipping")
+                return
 
-        reading = sensor_data["reading"]
-        ratings = sensor_data.get("ratings", {})
+            reading = sensor_data["reading"]
+            ratings = sensor_data.get("ratings", {})
 
-        debug_log(f"Warming cache with ratings: {ratings}", "ORCHESTRATOR")
+            if not ratings or "sup" not in ratings:
+                print(f"[WARMUP] ERROR: Invalid ratings: {ratings}")
+                return
 
-        # Generate all variations for both modes via batch calls
-        variations = {"sup": {}, "parawing": {}}
+            print(f"[WARMUP] Sensor OK: {reading.wind_speed_kts}kts {reading.wind_direction}, ratings={ratings}")
 
-        for mode in ["sup", "parawing"]:
-            mode_variations = self.llm_client.generate_all_variations(
-                wind_speed=reading.wind_speed_kts,
-                wind_direction=reading.wind_direction,
-                wave_height=0,
-                swell_direction="N",
-                rating=ratings[mode],
-                mode=mode
-            )
+            # Generate all variations for both modes via batch calls
+            variations = {"sup": {}, "parawing": {}}
 
-            if mode_variations:
-                variations[mode] = mode_variations
-                debug_log(f"Batch warmup: {len(mode_variations)} personas for {mode}", "ORCHESTRATOR")
-            else:
-                # Batch failed - fall back to individual calls
-                debug_log(f"Batch warmup failed for {mode}, falling back to individual calls", "ORCHESTRATOR")
-                from app.ai.personas import PERSONAS
-                for persona in PERSONAS:
-                    persona_id = persona["id"]
-                    persona_variations = self.llm_client.generate_single_persona_variations(
-                        wind_speed=reading.wind_speed_kts,
-                        wind_direction=reading.wind_direction,
-                        wave_height=0,
-                        swell_direction="N",
-                        rating=ratings[mode],
-                        mode=mode,
-                        persona_id=persona_id
-                    )
-                    if persona_variations:
-                        variations[mode][persona_id] = persona_variations
+            for mode in ["sup", "parawing"]:
+                print(f"[WARMUP] Generating {mode} variations...")
+                mode_variations = self.llm_client.generate_all_variations(
+                    wind_speed=reading.wind_speed_kts,
+                    wind_direction=reading.wind_direction,
+                    wave_height=0,
+                    swell_direction="N",
+                    rating=ratings[mode],
+                    mode=mode
+                )
 
-        self.cache.set_variations(ratings, variations)
-        debug_log(f"Cache warmup complete: {sum(len(v) for v in variations['sup'].values())} SUP variations", "ORCHESTRATOR")
+                if mode_variations:
+                    variations[mode] = mode_variations
+                    print(f"[WARMUP] Got {len(mode_variations)} personas for {mode}")
+                else:
+                    # Batch failed - fall back to individual calls
+                    print(f"[WARMUP] Batch failed for {mode}, trying individual calls...")
+                    from app.ai.personas import PERSONAS
+                    for persona in PERSONAS:
+                        persona_id = persona["id"]
+                        persona_variations = self.llm_client.generate_single_persona_variations(
+                            wind_speed=reading.wind_speed_kts,
+                            wind_direction=reading.wind_direction,
+                            wave_height=0,
+                            swell_direction="N",
+                            rating=ratings[mode],
+                            mode=mode,
+                            persona_id=persona_id
+                        )
+                        if persona_variations:
+                            variations[mode][persona_id] = persona_variations
+
+            self.cache.set_variations(ratings, variations)
+            total = sum(len(v) for v in variations['sup'].values())
+            print(f"[WARMUP] Complete! {total} SUP variations cached")
+
+        except Exception as e:
+            print(f"[WARMUP] ERROR: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
 
     def check_and_refresh_if_needed(self) -> None:
         """
