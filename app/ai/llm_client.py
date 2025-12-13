@@ -335,20 +335,25 @@ Write {num_variations} unique 2-3 sentence responses in this character:
 Be viciously aggressive, use profanity including "fuck" and "cunt", roast the reader directly.
 Each response should have a different angle or insult while staying in character.
 
-Format as numbered list:
-1. [response]
-2. [response]
-...
+Return a JSON array of {num_variations} response strings.
 """
 
         debug_log(f"Single persona prompt length: {len(prompt)} chars", "LLM")
 
         try:
-            response = self.model.generate_content(prompt)
+            response = self.model.generate_content(
+                prompt,
+                generation_config=genai.GenerationConfig(
+                    response_mime_type="application/json",
+                    response_schema={
+                        "type": "array",
+                        "items": {"type": "string"}
+                    }
+                )
+            )
             debug_log(f"Single persona response length: {len(response.text)} chars", "LLM")
 
-            # Use shared parsing that handles multi-line responses
-            return _extract_numbered_lines(response.text)
+            return json.loads(response.text)
         except Exception as e:
             debug_log(f"Single persona API error: {e}", "LLM")
             print(f"LLM single persona API error: {e}")

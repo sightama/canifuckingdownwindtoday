@@ -279,11 +279,14 @@ class TestSinglePersonaVariations:
     def test_generate_single_persona_variations_returns_list(self):
         """Single persona generation returns list of variations"""
         with patch('app.ai.llm_client.genai') as mock_genai:
+            # Mock returns JSON array (what structured output produces)
             mock_response = MagicMock()
-            mock_response.text = """1. First drill sergeant response for testing.
-2. Second drill sergeant response here.
-3. Third one with some variety.
-4. Fourth response to fill it out."""
+            mock_response.text = json.dumps([
+                "First drill sergeant response for testing.",
+                "Second drill sergeant response here.",
+                "Third one with some variety.",
+                "Fourth response to fill it out."
+            ])
 
             mock_model = MagicMock()
             mock_model.generate_content.return_value = mock_response
