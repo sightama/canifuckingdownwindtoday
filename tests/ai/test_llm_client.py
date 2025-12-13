@@ -1,6 +1,7 @@
 # ABOUTME: Tests for LLM client interface (Google Gemini API)
 # ABOUTME: Uses mocked responses to avoid real API calls and costs in tests
 
+import json
 from unittest.mock import Mock, patch, MagicMock
 from app.ai.llm_client import LLMClient
 
@@ -91,16 +92,20 @@ class TestBatchVariationGeneration:
     def test_generate_all_variations_returns_dict_structure(self):
         """Batch generation returns variations keyed by persona"""
         with patch('app.ai.llm_client.genai') as mock_genai:
-            # Mock the API response with our expected format
+            # Mock returns JSON string (what structured output produces)
             mock_response = MagicMock()
-            mock_response.text = """===PERSONA:drill_sergeant===
-1. First drill sergeant response for testing.
-2. Second drill sergeant response here.
-3. Third one with some variety.
-===PERSONA:disappointed_dad===
-1. First disappointed dad response.
-2. Second disappointed dad here.
-3. Third dad response."""
+            mock_response.text = json.dumps({
+                "drill_sergeant": [
+                    "First drill sergeant response for testing.",
+                    "Second drill sergeant response here.",
+                    "Third one with some variety."
+                ],
+                "disappointed_dad": [
+                    "First disappointed dad response.",
+                    "Second disappointed dad here.",
+                    "Third dad response."
+                ]
+            })
 
             mock_model = MagicMock()
             mock_model.generate_content.return_value = mock_response
@@ -203,6 +208,30 @@ wrap across multiple lines because it's verbose."""
         # Third response should be joined too
         assert "Another long response" in result["drill_sergeant"][2]
         assert "verbose" in result["drill_sergeant"][2]
+
+    def test_parse_variations_preserves_markdown_italic_in_text(self):
+        """Parser doesn't split on *word* markdown (regression test for cutoff bug)"""
+        # This bug caused text to be cut off at markdown italic like *zero*
+        # because the regex [=*#]+ matched single asterisks as persona delimiters
+        response = """===PERSONA:broadcaster===
+1. Well, folks, we have *zero* waves today! Plus, a North swell that's doing absolutely *nothing* helpful. Rating: 2/10.
+2. The conditions are *terrible* and you should stay home."""
+
+        from app.ai.llm_client import parse_variations_response
+        result = parse_variations_response(response)
+
+        assert "broadcaster" in result
+        assert len(result["broadcaster"]) == 2
+        # Text should NOT be cut off at *zero* - it should contain the full sentence
+        assert "zero waves today" in result["broadcaster"][0]
+        assert "North swell" in result["broadcaster"][0]
+        assert "Rating: 2/10" in result["broadcaster"][0]
+        # Markdown italic should be removed
+        assert "*zero*" not in result["broadcaster"][0]
+        assert "zero" in result["broadcaster"][0]
+        # Second variation should also be complete
+        assert "terrible" in result["broadcaster"][1]
+        assert "stay home" in result["broadcaster"][1]
 
 
 class TestOfflineVariations:

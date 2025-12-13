@@ -254,14 +254,9 @@ For EACH persona below, write {num_variations} unique 2-3 sentence responses.
 Be viciously aggressive, use profanity including "fuck" and "cunt", roast the reader directly.
 Each response should have a different angle or insult while staying in character.
 
-Format your response EXACTLY as shown (this format is required for parsing):
-===PERSONA:persona_id===
-1. [response]
-2. [response]
-...
-{num_variations}. [response]
+Return a JSON object where each key is a persona ID and each value is an array of {num_variations} response strings.
 
-Generate for these personas in this exact order: {persona_ids}
+Generate for these personas: {persona_ids}
 
 PERSONA STYLES:
 {persona_descriptions}
@@ -270,11 +265,26 @@ PERSONA STYLES:
         debug_log(f"Batch prompt length: {len(prompt)} chars", "LLM")
 
         try:
-            response = self.model.generate_content(prompt)
+            response = self.model.generate_content(
+                prompt,
+                generation_config=genai.GenerationConfig(
+                    response_mime_type="application/json",
+                    response_schema={
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "array",
+                            "items": {"type": "string"}
+                        }
+                    }
+                )
+            )
             debug_log(f"Batch response length: {len(response.text)} chars", "LLM")
-            # Log raw response for debugging cutoff issues
+            # Log raw response for debugging
             _log_llm_response(response.text, mode=mode, rating=rating, log_type="batch")
-            return parse_variations_response(response.text, mode=mode, rating=rating)
+
+            # Parse JSON and lowercase keys for consistency
+            data = json.loads(response.text)
+            return {k.lower(): v for k, v in data.items()}
         except Exception as e:
             debug_log(f"Batch API error: {e}", "LLM")
             print(f"LLM batch API error: {e}")
