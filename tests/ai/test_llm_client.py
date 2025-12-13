@@ -294,3 +294,38 @@ class TestSinglePersonaVariations:
             )
 
             assert result == []
+
+    def test_generate_single_persona_variations_handles_multiline(self):
+        """Single persona generation joins continuation lines correctly"""
+        with patch('app.ai.llm_client.genai') as mock_genai:
+            # LLM sometimes wraps long responses across multiple lines
+            mock_response = MagicMock()
+            mock_response.text = """1. Oh, you're going foiling? In
+these conditions? You absolute moron, stay home.
+2. This is a shorter response on one line.
+3. Another long response that the LLM decided to
+wrap across multiple lines because
+it's verbose as hell."""
+
+            mock_model = MagicMock()
+            mock_model.generate_content.return_value = mock_response
+            mock_genai.GenerativeModel.return_value = mock_model
+
+            client = LLMClient(api_key="test-key")
+            result = client.generate_single_persona_variations(
+                wind_speed=15.0,
+                wind_direction="N",
+                wave_height=0,
+                swell_direction="N",
+                rating=7,
+                mode="sup",
+                persona_id="drill_sergeant"
+            )
+
+            assert len(result) == 3
+            # First response should include BOTH lines joined
+            assert "Oh, you're going foiling?" in result[0]
+            assert "stay home" in result[0]  # This is from the continuation line
+            # Third response should have all 3 lines joined
+            assert "Another long response" in result[2]
+            assert "verbose as hell" in result[2]

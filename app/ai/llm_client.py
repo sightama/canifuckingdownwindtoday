@@ -333,21 +333,8 @@ Format as numbered list:
             response = self.model.generate_content(prompt)
             debug_log(f"Single persona response length: {len(response.text)} chars", "LLM")
 
-            # Parse numbered list - handle various LLM formatting quirks
-            lines = []
-            for line in response.text.strip().split('\n'):
-                line = line.strip()
-                # Match various formats: "1. text", "**1.** text", "1) text", "1: text"
-                match = re.match(r'^[\*]*(\d+)[\.\)\:][\*]*\s*(.+)$', line)
-                if match:
-                    text = match.group(2).strip()
-                    # Remove markdown formatting from the text
-                    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)  # Bold
-                    text = re.sub(r'\*(.+?)\*', r'\1', text)  # Italic
-                    if text:
-                        lines.append(text)
-
-            return lines
+            # Use shared parsing that handles multi-line responses
+            return _extract_numbered_lines(response.text)
         except Exception as e:
             debug_log(f"Single persona API error: {e}", "LLM")
             print(f"LLM single persona API error: {e}")
