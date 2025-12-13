@@ -19,10 +19,10 @@ class CrayonGraph:
     WIDTH = 300
     HEIGHT = 250
 
-    # Coast line runs from top-left-ish to bottom-right-ish
-    # Representing NNW to SSE orientation
-    COAST_START = (80, 30)
-    COAST_END = (220, 220)
+    # Coast line runs nearly vertical, slightly tilted right
+    # Representing NNW to SSE orientation (~17° from vertical)
+    COAST_START = (120, 30)
+    COAST_END = (180, 220)
 
     # Wind arrow directions (degrees, 0 = right/east, 90 = down/south)
     # Wind direction indicates where wind is COMING FROM, so arrow points opposite
