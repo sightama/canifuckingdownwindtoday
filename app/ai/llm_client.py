@@ -161,10 +161,15 @@ PERSONA STYLES:
                     response_mime_type="application/json",
                     response_schema={
                         "type": "object",
-                        "additionalProperties": {
-                            "type": "array",
-                            "items": {"type": "string"}
-                        }
+                        "properties": {
+                            "drill_sergeant": {"type": "array", "items": {"type": "string"}},
+                            "disappointed_dad": {"type": "array", "items": {"type": "string"}},
+                            "sarcastic_weatherman": {"type": "array", "items": {"type": "string"}},
+                            "jaded_local": {"type": "array", "items": {"type": "string"}},
+                            "angry_coach": {"type": "array", "items": {"type": "string"}},
+                            "passive_aggressive_ex": {"type": "array", "items": {"type": "string"}}
+                        },
+                        "required": ["drill_sergeant", "disappointed_dad", "sarcastic_weatherman", "jaded_local", "angry_coach", "passive_aggressive_ex"]
                     }
                 )
             )
@@ -293,10 +298,15 @@ PERSONA STYLES:
                     response_mime_type="application/json",
                     response_schema={
                         "type": "object",
-                        "additionalProperties": {
-                            "type": "array",
-                            "items": {"type": "string"}
-                        }
+                        "properties": {
+                            "drill_sergeant": {"type": "array", "items": {"type": "string"}},
+                            "disappointed_dad": {"type": "array", "items": {"type": "string"}},
+                            "sarcastic_weatherman": {"type": "array", "items": {"type": "string"}},
+                            "jaded_local": {"type": "array", "items": {"type": "string"}},
+                            "angry_coach": {"type": "array", "items": {"type": "string"}},
+                            "passive_aggressive_ex": {"type": "array", "items": {"type": "string"}}
+                        },
+                        "required": ["drill_sergeant", "disappointed_dad", "sarcastic_weatherman", "jaded_local", "angry_coach", "passive_aggressive_ex"]
                     }
                 )
             )
