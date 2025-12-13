@@ -107,24 +107,45 @@ def parse_variations_response(response_text: str, mode: str = "unknown", rating:
 
 
 def _extract_numbered_lines(content: str) -> list[str]:
-    """Extract numbered list items from content."""
-    lines = []
+    """Extract numbered list items from content, handling multi-line responses."""
+    items = []
+    current_item = None
+
     for line in content.split('\n'):
         line = line.strip()
-        # Match various formats: "1. text", "**1.** text", "1) text", "1: text", "- text"
-        match = re.match(r'^[\*\-]*\s*(\d+)?[\.\)\:\-]*\s*(.+)$', line)
+        if not line:
+            continue
+
+        # Check if this is a new numbered item (number is REQUIRED)
+        match = re.match(r'^[\*]*\s*(\d+)[\.\)\:]\s*(.+)$', line)
         if match:
-            text = match.group(2).strip()
-            # Skip if it's just a header or empty
-            if not text or text.lower().startswith('persona') or text.startswith('==='):
-                continue
-            # Remove markdown formatting from the text
-            text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)  # Bold
-            text = re.sub(r'\*(.+?)\*', r'\1', text)  # Italic
-            # Skip very short responses (likely parsing errors)
-            if len(text) >= 10:
-                lines.append(text)
-    return lines
+            # Save previous item if exists
+            if current_item is not None:
+                items.append(current_item)
+            # Start new item
+            current_item = match.group(2).strip()
+        elif current_item is not None:
+            # Continuation of previous item - append with space
+            current_item += ' ' + line
+
+    # Don't forget the last item
+    if current_item is not None:
+        items.append(current_item)
+
+    # Clean up markdown and filter
+    result = []
+    for text in items:
+        # Skip if it's just a header
+        if text.lower().startswith('persona') or text.startswith('==='):
+            continue
+        # Remove markdown formatting
+        text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)  # Bold
+        text = re.sub(r'\*(.+?)\*', r'\1', text)  # Italic
+        # Skip very short responses (likely parsing errors)
+        if len(text) >= 10:
+            result.append(text)
+
+    return result
 
 
 class LLMClient:

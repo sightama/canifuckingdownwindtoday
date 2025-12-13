@@ -183,6 +183,27 @@ class TestBatchVariationGeneration:
         assert len(result["jaded_local"]) == 2
         assert "maggot" in result["drill_sergeant"][0]
 
+    def test_parse_variations_handles_multiline_responses(self):
+        """Parser joins continuation lines to previous numbered item"""
+        # LLMs sometimes wrap long responses across multiple lines
+        response = """===PERSONA:drill_sergeant===
+1. So, for all you armchair meteorologists and wannabe hydrofoil enthusiasts,
+the conditions today in Jupiter are simply amazing and you should go out.
+2. This is a shorter response on one line.
+3. Another long response that the LLM decided to
+wrap across multiple lines because it's verbose."""
+
+        from app.ai.llm_client import parse_variations_response
+        result = parse_variations_response(response)
+
+        assert len(result["drill_sergeant"]) == 3
+        # First response should include both lines joined
+        assert "armchair meteorologists" in result["drill_sergeant"][0]
+        assert "simply amazing" in result["drill_sergeant"][0]
+        # Third response should be joined too
+        assert "Another long response" in result["drill_sergeant"][2]
+        assert "verbose" in result["drill_sergeant"][2]
+
 
 class TestOfflineVariations:
     """Tests for generating offline persona responses"""
