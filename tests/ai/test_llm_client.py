@@ -146,6 +146,30 @@ class TestBatchVariationGeneration:
 
             assert result == {}
 
+    def test_generate_all_variations_handles_invalid_json(self):
+        """Returns empty dict if JSON parsing somehow fails"""
+        with patch('app.ai.llm_client.genai') as mock_genai:
+            # This shouldn't happen with structured output, but test the error path
+            mock_response = MagicMock()
+            mock_response.text = "not valid json {"
+
+            mock_model = MagicMock()
+            mock_model.generate_content.return_value = mock_response
+            mock_genai.GenerativeModel.return_value = mock_model
+
+            client = LLMClient(api_key="test-key")
+            result = client.generate_all_variations(
+                wind_speed=15.0,
+                wind_direction="N",
+                wave_height=2.5,
+                swell_direction="NE",
+                rating=7,
+                mode="sup"
+            )
+
+            # Should return empty dict on parse failure, not crash
+            assert result == {}
+
 
 class TestOfflineVariations:
     """Tests for generating offline persona responses"""
