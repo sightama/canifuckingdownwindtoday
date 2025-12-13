@@ -2,6 +2,7 @@
 # ABOUTME: Supports Google Gemini 2.5 Flash-Lite with persona-based prompts
 
 import google.generativeai as genai
+import json
 import re
 import os
 from datetime import datetime
@@ -65,7 +66,9 @@ def parse_variations_response(response_text: str, mode: str = "unknown", rating:
     # Strategy 1: Split on persona markers (flexible format)
     # Handles: ===PERSONA:id===, ===id===, **PERSONA:id**, etc.
     # PERSONA: prefix is optional since LLMs sometimes omit it
-    parts = re.split(r'[=\*#]+\s*(?:PERSONA[:\s]+)?(\w+)\s*[=\*#]+', response_text, flags=re.IGNORECASE)
+    # NOTE: Use {2,} to require at least 2 delimiters, avoiding conflict with
+    # markdown italic (*word*) which uses single asterisks
+    parts = re.split(r'[=\*#]{2,}\s*(?:PERSONA[:\s]+)?(\w+)\s*[=\*#]{2,}', response_text, flags=re.IGNORECASE)
 
     # parts[0] is empty or preamble, then alternating: persona_id, content, persona_id, content...
     for i in range(1, len(parts), 2):
