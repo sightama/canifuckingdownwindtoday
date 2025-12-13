@@ -56,13 +56,9 @@ class AppOrchestrator:
         if self.cache.is_offline():
             return self._build_offline_response()
 
-        # Get current ratings
-        current_ratings = self.cache.get_ratings()
-
-        # Check if variations need refresh (rating changed or TTL expired)
-        if current_ratings and self.cache.should_regenerate_variations(current_ratings):
-            self._refresh_variations(current_ratings)
-
+        # Don't block on variation regeneration - periodic refresh handles that.
+        # Page loads should always be instant, using whatever's cached.
+        # Small rating fluctuations (3→4) don't need fresh variations.
         return self._build_online_response()
 
     def get_initial_data(self, persona_id: str) -> dict:

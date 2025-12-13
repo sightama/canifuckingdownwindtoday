@@ -69,7 +69,7 @@ class TestUnifiedCacheIntegration:
     """Integration tests for the unified caching system"""
 
     def test_full_refresh_cycle(self):
-        """Test complete refresh: weather fetch -> rating calc -> variation generation"""
+        """Test complete refresh: warmup_cache generates variations, get_cached_data reads them"""
         with patch('app.weather.sensor.SensorClient.fetch') as mock_sensor_fetch, \
              patch('app.ai.llm_client.genai') as mock_genai:
 
@@ -109,8 +109,18 @@ class TestUnifiedCacheIntegration:
 
             orchestrator = AppOrchestrator(api_key="test_key")
 
-            # First call should trigger refresh
+            # warmup_cache is what generates variations (called on server startup)
+            orchestrator.warmup_cache()
+
+            # Verify LLM was called twice (once for sup, once for parawing)
+            assert mock_model.generate_content.call_count == 2
+
+            # Now get_cached_data should return cached data instantly (no LLM calls)
+            initial_llm_call_count = mock_model.generate_content.call_count
             data = orchestrator.get_cached_data()
+
+            # Verify no new LLM calls - page loads must be instant
+            assert mock_model.generate_content.call_count == initial_llm_call_count
 
             # Verify weather data was fetched and cached
             assert data['weather'] is not None
@@ -124,7 +134,7 @@ class TestUnifiedCacheIntegration:
             assert isinstance(data['ratings']['sup'], int)
             assert isinstance(data['ratings']['parawing'], int)
 
-            # Verify variations generated for both modes
+            # Verify variations available from cache
             assert 'sup' in data['variations']
             assert 'parawing' in data['variations']
 
@@ -133,23 +143,6 @@ class TestUnifiedCacheIntegration:
             assert 'disappointed_dad' in data['variations']['sup']
             assert len(data['variations']['sup']['drill_sergeant']) == 3
             assert len(data['variations']['sup']['disappointed_dad']) == 3
-
-            # Verify LLM was called twice (once for sup, once for parawing)
-            assert mock_model.generate_content.call_count == 2
-
-            # Second call should use cache (no new API calls)
-            initial_sensor_call_count = mock_sensor_fetch.call_count
-            initial_llm_call_count = mock_model.generate_content.call_count
-
-            data2 = orchestrator.get_cached_data()
-
-            # Verify no new API calls were made
-            assert mock_sensor_fetch.call_count == initial_sensor_call_count
-            assert mock_model.generate_content.call_count == initial_llm_call_count
-
-            # Verify data is the same
-            assert data2['weather']['wind_direction'] == 'N'
-            assert data2['ratings'] == data['ratings']
 
 
 class TestSensorIntegration:

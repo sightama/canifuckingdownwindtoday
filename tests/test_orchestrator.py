@@ -113,8 +113,8 @@ class TestSensorFlow:
 
             mock_cache.set_offline.assert_called()
 
-    def test_regenerates_variations_when_rating_changes(self):
-        """LLM variations regenerate when rating changes"""
+    def test_get_cached_data_never_blocks_on_llm(self):
+        """get_cached_data should never block on LLM regeneration - periodic refresh handles that"""
         with patch('app.orchestrator.SensorClient') as MockSensor, \
              patch('app.orchestrator.LLMClient') as MockLLM, \
              patch('app.orchestrator.CacheManager') as MockCache, \
@@ -138,6 +138,7 @@ class TestSensorFlow:
             mock_cache.is_sensor_stale.return_value = True
             mock_cache.is_offline.return_value = False
             mock_cache.get_ratings.return_value = {"sup": 8, "parawing": 9}
+            # Even if cache says variations need regeneration...
             mock_cache.should_regenerate_variations.return_value = True
             MockCache.return_value = mock_cache
 
@@ -159,8 +160,8 @@ class TestSensorFlow:
 
             orchestrator.get_cached_data()
 
-            # Should have generated variations
-            assert mock_llm.generate_all_variations.call_count >= 1
+            # Should NOT have called LLM - page loads must be instant
+            assert mock_llm.generate_all_variations.call_count == 0
 
     def test_returns_offline_state_with_last_known(self):
         """When offline, returns last known reading info"""
