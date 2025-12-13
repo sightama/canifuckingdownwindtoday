@@ -14,9 +14,13 @@ orchestrator = AppOrchestrator(api_key=Config.GEMINI_API_KEY)
 
 # Periodic refresh task - runs in background
 async def periodic_refresh_loop():
-    """Background loop that checks cache refresh every 5 minutes."""
+    """Background loop that keeps sensor cache warm.
+
+    Runs every 90 seconds to ensure cache never goes stale (TTL is 2 min).
+    This prevents user requests from triggering slow synchronous sensor fetches.
+    """
     while True:
-        await asyncio.sleep(300)  # 5 minutes
+        await asyncio.sleep(90)  # 90 seconds - keeps cache warm before 2-min TTL
         try:
             # Run in executor to avoid blocking the event loop (kills WebSocket heartbeats)
             loop = asyncio.get_event_loop()
