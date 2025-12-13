@@ -386,14 +386,9 @@ For EACH persona below, write {num_variations} unique 1-2 sentence responses abo
 Stay in character. Be witty. Reference the sensor outage. You can still use profanity and roast the user.
 Don't provide any actual wind information - just comment on the fact that we can't give them a rating.
 
-Format your response EXACTLY as shown (this format is required for parsing):
-===PERSONA:persona_id===
-1. [response]
-2. [response]
-...
-{num_variations}. [response]
+Return a JSON object where each key is a persona ID and each value is an array of {num_variations} response strings.
 
-Generate for these personas in this exact order: {persona_ids}
+Generate for these personas: {persona_ids}
 
 PERSONA STYLES:
 {persona_descriptions}
@@ -402,9 +397,24 @@ PERSONA STYLES:
         debug_log(f"Offline prompt length: {len(prompt)} chars", "LLM")
 
         try:
-            response = self.model.generate_content(prompt)
+            response = self.model.generate_content(
+                prompt,
+                generation_config=genai.GenerationConfig(
+                    response_mime_type="application/json",
+                    response_schema={
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "array",
+                            "items": {"type": "string"}
+                        }
+                    }
+                )
+            )
             debug_log(f"Offline response length: {len(response.text)} chars", "LLM")
-            return parse_variations_response(response.text, mode="offline", rating=0)
+
+            # Parse JSON and lowercase keys for consistency
+            data = json.loads(response.text)
+            return {k.lower(): v for k, v in data.items()}
         except Exception as e:
             debug_log(f"Offline API error: {e}", "LLM")
             print(f"LLM offline API error: {e}")

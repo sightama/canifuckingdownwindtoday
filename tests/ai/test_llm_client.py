@@ -240,13 +240,18 @@ class TestOfflineVariations:
     def test_generate_offline_variations_returns_dict(self):
         """Offline generation returns variations keyed by persona"""
         with patch('app.ai.llm_client.genai') as mock_genai:
+            # Mock returns JSON string (what structured output produces)
             mock_response = MagicMock()
-            mock_response.text = """===PERSONA:drill_sergeant===
-1. The sensor's AWOL, just like your commitment to this sport, maggot!
-2. Can't get a reading? Maybe the sensor got tired of watching you fail.
-===PERSONA:disappointed_dad===
-1. Even the sensor doesn't want to watch you foil today. Can't say I blame it.
-2. The sensor's taking a break. Wish I could take a break from your excuses."""
+            mock_response.text = json.dumps({
+                "drill_sergeant": [
+                    "The sensor's AWOL, just like your commitment to this sport, maggot!",
+                    "Can't get a reading? Maybe the sensor got tired of watching you fail."
+                ],
+                "disappointed_dad": [
+                    "Even the sensor doesn't want to watch you foil today. Can't say I blame it.",
+                    "The sensor's taking a break. Wish I could take a break from your excuses."
+                ]
+            })
 
             mock_model = MagicMock()
             mock_model.generate_content.return_value = mock_response
