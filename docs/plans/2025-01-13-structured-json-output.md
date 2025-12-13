@@ -34,6 +34,8 @@ Then it parses this with regex. This keeps breaking:
 
 Gemini supports **structured output** - you provide a JSON schema, and the API guarantees the response conforms to it. No parsing needed, just `json.loads()`.
 
+**Important Gemini API Limitation:** Gemini does NOT support `additionalProperties` in schemas. You must define explicit `properties` with all expected keys. This means persona IDs are hardcoded in the schema - if you add a new persona to `personas.py`, you must also update the schema in `generate_all_variations` and `generate_offline_variations`.
+
 ### Files You'll Touch
 
 | File | Action |
@@ -227,10 +229,15 @@ PERSONA STYLES:
                 response_mime_type="application/json",
                 response_schema={
                     "type": "object",
-                    "additionalProperties": {
-                        "type": "array",
-                        "items": {"type": "string"}
-                    }
+                    "properties": {
+                        "drill_sergeant": {"type": "array", "items": {"type": "string"}},
+                        "disappointed_dad": {"type": "array", "items": {"type": "string"}},
+                        "sarcastic_weatherman": {"type": "array", "items": {"type": "string"}},
+                        "jaded_local": {"type": "array", "items": {"type": "string"}},
+                        "angry_coach": {"type": "array", "items": {"type": "string"}},
+                        "passive_aggressive_ex": {"type": "array", "items": {"type": "string"}}
+                    },
+                    "required": ["drill_sergeant", "disappointed_dad", "sarcastic_weatherman", "jaded_local", "angry_coach", "passive_aggressive_ex"]
                 }
             )
         )
@@ -502,10 +509,15 @@ PERSONA STYLES:
                 response_mime_type="application/json",
                 response_schema={
                     "type": "object",
-                    "additionalProperties": {
-                        "type": "array",
-                        "items": {"type": "string"}
-                    }
+                    "properties": {
+                        "drill_sergeant": {"type": "array", "items": {"type": "string"}},
+                        "disappointed_dad": {"type": "array", "items": {"type": "string"}},
+                        "sarcastic_weatherman": {"type": "array", "items": {"type": "string"}},
+                        "jaded_local": {"type": "array", "items": {"type": "string"}},
+                        "angry_coach": {"type": "array", "items": {"type": "string"}},
+                        "passive_aggressive_ex": {"type": "array", "items": {"type": "string"}}
+                    },
+                    "required": ["drill_sergeant", "disappointed_dad", "sarcastic_weatherman", "jaded_local", "angry_coach", "passive_aggressive_ex"]
                 }
             )
         )
