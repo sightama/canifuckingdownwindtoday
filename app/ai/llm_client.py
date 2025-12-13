@@ -2,7 +2,7 @@
 # ABOUTME: Supports Google Gemini 2.5 Flash-Lite with persona-based prompts
 
 import google.generativeai as genai
-import re
+import json
 import os
 from datetime import datetime
 from typing import Optional
@@ -38,113 +38,6 @@ def _log_llm_response(response_text: str, mode: str, rating: int, log_type: str 
 def _log_failed_batch_response(response_text: str, mode: str, rating: int) -> None:
     """Log failed batch parsing responses to file for debugging."""
     _log_llm_response(response_text, mode, rating, log_type="failure")
-
-
-def parse_variations_response(response_text: str, mode: str = "unknown", rating: int = 0) -> dict[str, list[str]]:
-    """
-    Parse the mega-prompt response into a dict of persona variations.
-
-    Expected format:
-    ===PERSONA:persona_id===
-    1. First response
-    2. Second response
-    ...
-
-    Args:
-        response_text: The LLM response to parse
-        mode: The mode ("sup" or "parawing") for logging
-        rating: The rating for logging
-
-    Returns:
-        {"persona_id": ["response1", "response2", ...], ...}
-    """
-    result: dict[str, list[str]] = {}
-
-    # Try multiple parsing strategies
-
-    # Strategy 1: Split on persona markers (flexible format)
-    # Handles: ===PERSONA:id===, ===id===, **PERSONA:id**, etc.
-    # PERSONA: prefix is optional since LLMs sometimes omit it
-    parts = re.split(r'[=\*#]+\s*(?:PERSONA[:\s]+)?(\w+)\s*[=\*#]+', response_text, flags=re.IGNORECASE)
-
-    # parts[0] is empty or preamble, then alternating: persona_id, content, persona_id, content...
-    for i in range(1, len(parts), 2):
-        if i + 1 < len(parts):
-            persona_id = parts[i].strip().lower()
-            content = parts[i + 1].strip()
-
-            # Extract numbered responses - handle various LLM formatting quirks
-            lines = _extract_numbered_lines(content)
-
-            if lines:
-                result[persona_id] = lines
-
-    # If strategy 1 failed, try looking for persona names as headers
-    if not result:
-        debug_log("Batch parsing strategy 1 failed, trying strategy 2", "LLM")
-        # Look for persona names followed by content
-        from app.ai.personas import PERSONAS
-        persona_ids = [p['id'] for p in PERSONAS]
-
-        for persona_id in persona_ids:
-            # Find this persona's section
-            # Include = in delimiters since LLMs often use ===ID=== format
-            pattern = rf'(?:^|\n)[#\*=\s]*{re.escape(persona_id)}[#\*=:\s]*\n(.*?)(?=(?:\n[#\*=\s]*(?:{"|".join(persona_ids)})[#\*=:\s]*\n)|$)'
-            match = re.search(pattern, response_text, re.IGNORECASE | re.DOTALL)
-            if match:
-                content = match.group(1).strip()
-                lines = _extract_numbered_lines(content)
-                if lines:
-                    result[persona_id] = lines
-
-    if not result:
-        debug_log(f"Batch parsing failed. Response preview: {response_text[:500]}", "LLM")
-        # Log the full failed response to file
-        _log_failed_batch_response(response_text, mode, rating)
-
-    return result
-
-
-def _extract_numbered_lines(content: str) -> list[str]:
-    """Extract numbered list items from content, handling multi-line responses."""
-    items = []
-    current_item = None
-
-    for line in content.split('\n'):
-        line = line.strip()
-        if not line:
-            continue
-
-        # Check if this is a new numbered item (number is REQUIRED)
-        match = re.match(r'^[\*]*\s*(\d+)[\.\)\:]\s*(.+)$', line)
-        if match:
-            # Save previous item if exists
-            if current_item is not None:
-                items.append(current_item)
-            # Start new item
-            current_item = match.group(2).strip()
-        elif current_item is not None:
-            # Continuation of previous item - append with space
-            current_item += ' ' + line
-
-    # Don't forget the last item
-    if current_item is not None:
-        items.append(current_item)
-
-    # Clean up markdown and filter
-    result = []
-    for text in items:
-        # Skip if it's just a header
-        if text.lower().startswith('persona') or text.startswith('==='):
-            continue
-        # Remove markdown formatting
-        text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)  # Bold
-        text = re.sub(r'\*(.+?)\*', r'\1', text)  # Italic
-        # Skip very short responses (likely parsing errors)
-        if len(text) >= 10:
-            result.append(text)
-
-    return result
 
 
 class LLMClient:
@@ -251,14 +144,9 @@ For EACH persona below, write {num_variations} unique 2-3 sentence responses.
 Be viciously aggressive, use profanity including "fuck" and "cunt", roast the reader directly.
 Each response should have a different angle or insult while staying in character.
 
-Format your response EXACTLY as shown (this format is required for parsing):
-===PERSONA:persona_id===
-1. [response]
-2. [response]
-...
-{num_variations}. [response]
+Return a JSON object where each key is a persona ID and each value is an array of {num_variations} response strings.
 
-Generate for these personas in this exact order: {persona_ids}
+Generate for these personas: {persona_ids}
 
 PERSONA STYLES:
 {persona_descriptions}
@@ -267,11 +155,26 @@ PERSONA STYLES:
         debug_log(f"Batch prompt length: {len(prompt)} chars", "LLM")
 
         try:
-            response = self.model.generate_content(prompt)
+            response = self.model.generate_content(
+                prompt,
+                generation_config=genai.GenerationConfig(
+                    response_mime_type="application/json",
+                    response_schema={
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "array",
+                            "items": {"type": "string"}
+                        }
+                    }
+                )
+            )
             debug_log(f"Batch response length: {len(response.text)} chars", "LLM")
-            # Log raw response for debugging cutoff issues
+            # Log raw response for debugging
             _log_llm_response(response.text, mode=mode, rating=rating, log_type="batch")
-            return parse_variations_response(response.text, mode=mode, rating=rating)
+
+            # Parse JSON and lowercase keys for consistency
+            data = json.loads(response.text)
+            return {k.lower(): v for k, v in data.items()}
         except Exception as e:
             debug_log(f"Batch API error: {e}", "LLM")
             print(f"LLM batch API error: {e}")
@@ -322,20 +225,25 @@ Write {num_variations} unique 2-3 sentence responses in this character:
 Be viciously aggressive, use profanity including "fuck" and "cunt", roast the reader directly.
 Each response should have a different angle or insult while staying in character.
 
-Format as numbered list:
-1. [response]
-2. [response]
-...
+Return a JSON array of {num_variations} response strings.
 """
 
         debug_log(f"Single persona prompt length: {len(prompt)} chars", "LLM")
 
         try:
-            response = self.model.generate_content(prompt)
+            response = self.model.generate_content(
+                prompt,
+                generation_config=genai.GenerationConfig(
+                    response_mime_type="application/json",
+                    response_schema={
+                        "type": "array",
+                        "items": {"type": "string"}
+                    }
+                )
+            )
             debug_log(f"Single persona response length: {len(response.text)} chars", "LLM")
 
-            # Use shared parsing that handles multi-line responses
-            return _extract_numbered_lines(response.text)
+            return json.loads(response.text)
         except Exception as e:
             debug_log(f"Single persona API error: {e}", "LLM")
             print(f"LLM single persona API error: {e}")
@@ -368,14 +276,9 @@ For EACH persona below, write {num_variations} unique 1-2 sentence responses abo
 Stay in character. Be witty. Reference the sensor outage. You can still use profanity and roast the user.
 Don't provide any actual wind information - just comment on the fact that we can't give them a rating.
 
-Format your response EXACTLY as shown (this format is required for parsing):
-===PERSONA:persona_id===
-1. [response]
-2. [response]
-...
-{num_variations}. [response]
+Return a JSON object where each key is a persona ID and each value is an array of {num_variations} response strings.
 
-Generate for these personas in this exact order: {persona_ids}
+Generate for these personas: {persona_ids}
 
 PERSONA STYLES:
 {persona_descriptions}
@@ -384,9 +287,24 @@ PERSONA STYLES:
         debug_log(f"Offline prompt length: {len(prompt)} chars", "LLM")
 
         try:
-            response = self.model.generate_content(prompt)
+            response = self.model.generate_content(
+                prompt,
+                generation_config=genai.GenerationConfig(
+                    response_mime_type="application/json",
+                    response_schema={
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "array",
+                            "items": {"type": "string"}
+                        }
+                    }
+                )
+            )
             debug_log(f"Offline response length: {len(response.text)} chars", "LLM")
-            return parse_variations_response(response.text, mode="offline", rating=0)
+
+            # Parse JSON and lowercase keys for consistency
+            data = json.loads(response.text)
+            return {k.lower(): v for k, v in data.items()}
         except Exception as e:
             debug_log(f"Offline API error: {e}", "LLM")
             print(f"LLM offline API error: {e}")

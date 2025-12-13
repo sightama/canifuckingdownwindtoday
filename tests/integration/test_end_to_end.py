@@ -1,6 +1,7 @@
 # ABOUTME: End-to-end integration tests with mocked external APIs
 # ABOUTME: Validates full flow from weather fetch to rating generation
 
+import json
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime, timezone, timedelta
@@ -76,32 +77,40 @@ class TestUnifiedCacheIntegration:
             # Mock sensor reading (18 knots from N)
             mock_sensor_fetch.return_value = create_sensor_reading(18.0, "N")
 
-            # Mock LLM response with proper persona format
+            # Mock LLM response with JSON format (structured output)
             mock_llm_response = MagicMock()
-            mock_llm_response.text = """===PERSONA:drill_sergeant===
-1. Listen up, maggot! 18 knots of offshore wind and 2.5-foot waves? This isn't a fucking daycare. Get your ass on that foil and stop whining.
-2. Oh, what's the matter, recruit? Wind's blowing offshore and you need me to hold your hand? Pathetic. Real foilers don't need perfect conditions to show up.
-3. I've seen better commitment from hungover civilians. 18 knots and clean seas, and you're checking the app like some kind of amateur. Disappointing.
-===PERSONA:disappointed_dad===
-1. Well, son, I see the wind's blowing offshore at 18 knots. I'm not saying you'll mess this up, but... you usually do.
-2. Your brother wouldn't need to check an app for these conditions. He'd just know. But I guess we can't all be gifted.
-3. I suppose 18 knots is decent. Though I remember when you said 15 was too much for you. I'm just... never mind.
-===PERSONA:sarcastic_weatherman===
-1. Well, well, well! Looks like Mother Nature decided to throw you foiling kooks a bone with 18 knots offshore! Don't blow it, Chad!
-2. Exciting news, foil fans! We've got 18 knots of wind that you'll probably waste by staying on the beach scrolling Instagram. Stay classy!
-3. Breaking: Local conditions actually decent for once! Wind at 18 knots, waves clean. Try not to screw it up. This is Chad Storm, over and out!
-===PERSONA:jaded_local===
-1. 18 knots offshore? Back in 2019, we'd have killed for these conditions and we didn't need some fucking app to tell us. You kooks don't even know.
-2. Yeah, it's decent out there. Not that you'll appreciate it. Too busy taking selfies and crowding the lineup with your rental gear.
-3. Offshore at 18? In the old days, the real locals would already be out there. Now it's just tourists checking apps. Pathetic.
-===PERSONA:angry_coach===
-1. EIGHTEEN KNOTS OFFSHORE AND YOU'RE READING THIS?! DROP AND GIVE ME TWENTY PADDLES, THEN GET YOUR ASS ON THE WATER! NOW!
-2. This is PERFECT training conditions and you're wasting my time checking ratings?! I should bench you for the entire season! MOVE!
-3. You call yourself a foiler?! 18 knots offshore is EXACTLY what we trained for! If you're not rigged in five minutes, you're doing punishment drills!
-===PERSONA:passive_aggressive_ex===
-1. Oh, 18 knots offshore? That's nice. I just think it's funny how you always said that was too windy for you, but sure, go have fun.
-2. I'm so happy for you that conditions are good! Though I remember you saying you didn't really like foiling that much anyway. But that's great!
-3. Wow, perfect wind and waves! I'm sure you'll have an amazing time. Not that you ever appreciated when I came to watch you. But whatever, enjoy!"""
+            mock_llm_response.text = json.dumps({
+                "drill_sergeant": [
+                    "Listen up, maggot! 18 knots of offshore wind? Get your ass on that foil and stop whining.",
+                    "Wind's blowing offshore and you need me to hold your hand? Pathetic.",
+                    "18 knots and clean seas, and you're checking the app like some kind of amateur."
+                ],
+                "disappointed_dad": [
+                    "I see the wind's blowing offshore at 18 knots. I'm not saying you'll mess this up, but... you usually do.",
+                    "Your brother wouldn't need to check an app for these conditions.",
+                    "I suppose 18 knots is decent. Though I remember when you said 15 was too much for you."
+                ],
+                "sarcastic_weatherman": [
+                    "Looks like Mother Nature decided to throw you foiling kooks a bone with 18 knots offshore!",
+                    "We've got 18 knots of wind that you'll probably waste by staying on the beach.",
+                    "Wind at 18 knots, waves clean. Try not to screw it up. This is Chad Storm, over and out!"
+                ],
+                "jaded_local": [
+                    "18 knots offshore? Back in 2019, we'd have killed for these conditions.",
+                    "Yeah, it's decent out there. Not that you'll appreciate it.",
+                    "In the old days, the real locals would already be out there."
+                ],
+                "angry_coach": [
+                    "EIGHTEEN KNOTS OFFSHORE AND YOU'RE READING THIS?! GET YOUR ASS ON THE WATER!",
+                    "This is PERFECT training conditions and you're wasting my time checking ratings?!",
+                    "18 knots offshore is EXACTLY what we trained for!"
+                ],
+                "passive_aggressive_ex": [
+                    "Oh, 18 knots offshore? That's nice. I just think it's funny how you always said that was too windy.",
+                    "I'm so happy for you that conditions are good!",
+                    "Wow, perfect wind and waves! I'm sure you'll have an amazing time."
+                ]
+            })
 
             mock_model = MagicMock()
             mock_model.generate_content.return_value = mock_llm_response
